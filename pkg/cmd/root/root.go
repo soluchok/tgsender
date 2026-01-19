@@ -11,6 +11,7 @@ import (
 	"github.com/soluchok/tgsender/pkg/cmd/check"
 	"github.com/soluchok/tgsender/pkg/cmd/dump"
 	"github.com/soluchok/tgsender/pkg/cmd/send"
+	"github.com/soluchok/tgsender/pkg/cmd/serve"
 )
 
 func New() *cobra.Command {
@@ -22,6 +23,7 @@ func New() *cobra.Command {
 	cmd.AddCommand(check.New())
 	cmd.AddCommand(send.New())
 	cmd.AddCommand(dump.New())
+	cmd.AddCommand(serve.New())
 
 	return cmd
 }
