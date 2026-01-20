@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
@@ -51,7 +52,7 @@ func NewStore(dataDir string) (*Store, error) {
 	return store, nil
 }
 
-// GetByOwner returns all accounts owned by a user
+// GetByOwner returns all accounts owned by a user, sorted by creation time
 func (s *Store) GetByOwner(ownerID int64) []*Account {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -62,6 +63,12 @@ func (s *Store) GetByOwner(ownerID int64) []*Account {
 			accounts = append(accounts, acc)
 		}
 	}
+
+	// Sort by creation time (oldest first)
+	sort.Slice(accounts, func(i, j int) bool {
+		return accounts[i].CreatedAt.Before(accounts[j].CreatedAt)
+	})
+
 	return accounts
 }
 
@@ -135,6 +142,19 @@ func (s *Store) UpdateStatus(id string, isActive bool) error {
 	}
 
 	acc.IsActive = isActive
+	return s.save()
+}
+
+// Update updates an account in the store
+func (s *Store) Update(account *Account) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.accounts[account.ID]; !ok {
+		return fmt.Errorf("account not found")
+	}
+
+	s.accounts[account.ID] = account
 	return s.save()
 }
 

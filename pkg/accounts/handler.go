@@ -11,14 +11,16 @@ import (
 type Handler struct {
 	store     *Store
 	qrManager *QRAuthManager
+	validator *Validator
 	auth      *auth.Handler
 }
 
 // NewHandler creates a new accounts handler
-func NewHandler(store *Store, qrManager *QRAuthManager, authHandler *auth.Handler) *Handler {
+func NewHandler(store *Store, qrManager *QRAuthManager, validator *Validator, authHandler *auth.Handler) *Handler {
 	return &Handler{
 		store:     store,
 		qrManager: qrManager,
+		validator: validator,
 		auth:      authHandler,
 	}
 }
@@ -72,6 +74,54 @@ func (h *Handler) HandleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]string{"message": "Account deleted"}, http.StatusOK)
+}
+
+// HandleValidateAccount handles GET /api/accounts/{id}/validate
+func (h *Handler) HandleValidateAccount(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ownerID, ok := h.getOwnerID(r)
+	if !ok {
+		writeJSONError(w, "Not authenticated", http.StatusUnauthorized)
+		return
+	}
+
+	// Extract account ID from path
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSONError(w, "Account ID required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify account exists and belongs to this owner
+	account, ok := h.store.Get(id)
+	if !ok {
+		writeJSONError(w, "Account not found", http.StatusNotFound)
+		return
+	}
+
+	if account.OwnerID != ownerID {
+		writeJSONError(w, "Unauthorized", http.StatusForbidden)
+		return
+	}
+
+	// Validate and update status
+	result, err := h.validator.ValidateAndUpdateStatus(r.Context(), id)
+	if err != nil {
+		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Get updated account
+	account, _ = h.store.Get(id)
+
+	writeJSON(w, map[string]interface{}{
+		"is_active": result.IsValid,
+		"account":   account,
+	}, http.StatusOK)
 }
 
 // HandleStartQRAuth handles POST /api/accounts/qr/start

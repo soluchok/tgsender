@@ -21,7 +21,9 @@ type Contact struct {
 	FirstName  string    `json:"first_name"`
 	LastName   string    `json:"last_name,omitempty"`
 	Username   string    `json:"username,omitempty"`
-	IsValid    bool      `json:"is_valid"` // Whether the phone is registered on Telegram
+	PhotoURL   string    `json:"photo_url,omitempty"` // Base64 encoded profile photo
+	Labels     []string  `json:"labels,omitempty"`    // Tags/labels for the contact (e.g., "chat", "phone", "username")
+	IsValid    bool      `json:"is_valid"`            // Whether the phone is registered on Telegram
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
@@ -143,7 +145,7 @@ func (s *Store) BulkCreateOrUpdate(contacts []*Contact) error {
 		// Check for existing contact by account ID and phone
 		var found bool
 		for _, existing := range s.contacts {
-			if existing.AccountID == contact.AccountID && existing.Phone == contact.Phone {
+			if existing.AccountID == contact.AccountID && existing.TelegramID == contact.TelegramID {
 				// Update existing contact
 				contact.ID = existing.ID
 				contact.CreatedAt = existing.CreatedAt

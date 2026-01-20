@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
+	"github.com/gotd/td/telegram/downloader"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
 	"rsc.io/qr"
@@ -389,6 +391,9 @@ func (m *QRAuthManager) handle2FA(ctx context.Context, client *telegram.Client, 
 
 		slog.Info("2FA successful", "user_id", user.ID)
 
+		// Download profile photo
+		photoURL := downloadProfilePhoto(ctx, client, user)
+
 		// Create and save account with session token
 		account := &Account{
 			OwnerID:      session.ownerID,
@@ -398,6 +403,7 @@ func (m *QRAuthManager) handle2FA(ctx context.Context, client *telegram.Client, 
 			LastName:     user.LastName,
 			Username:     user.Username,
 			SessionToken: session.state.Token, // Store the session token
+			PhotoURL:     photoURL,
 			IsActive:     true,
 		}
 
@@ -437,6 +443,9 @@ func (m *QRAuthManager) handleLoginSuccess(ctx context.Context, client *telegram
 
 	slog.Info("login successful", "user_id", user.ID, "username", user.Username)
 
+	// Download profile photo
+	photoURL := downloadProfilePhoto(ctx, client, user)
+
 	// Create account with session token for later API calls
 	account := &Account{
 		OwnerID:      session.ownerID,
@@ -446,6 +455,7 @@ func (m *QRAuthManager) handleLoginSuccess(ctx context.Context, client *telegram
 		LastName:     user.LastName,
 		Username:     user.Username,
 		SessionToken: session.state.Token, // Store the session token
+		PhotoURL:     photoURL,
 		IsActive:     true,
 	}
 
@@ -472,4 +482,29 @@ func generateQRCode(url string) (string, error) {
 
 	png := code.PNG()
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(png), nil
+}
+
+// downloadProfilePhoto downloads the profile photo for a user
+func downloadProfilePhoto(ctx context.Context, client *telegram.Client, user *tg.User) string {
+	photo, ok := user.Photo.AsNotEmpty()
+	if !ok {
+		return "" // No photo set
+	}
+
+	d := downloader.NewDownloader()
+	var buf strings.Builder
+	writer := base64.NewEncoder(base64.StdEncoding, &buf)
+
+	_, err := d.Download(client.API(), &tg.InputPeerPhotoFileLocation{
+		Peer:    user.AsInputPeer(),
+		PhotoID: photo.PhotoID,
+	}).Stream(ctx, writer)
+	writer.Close()
+
+	if err != nil {
+		slog.Warn("failed to download profile photo", "error", err)
+		return ""
+	}
+
+	return "data:image/jpeg;base64," + buf.String()
 }

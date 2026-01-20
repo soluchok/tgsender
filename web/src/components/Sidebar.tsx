@@ -1,11 +1,17 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAccounts } from '../contexts';
 import { TelegramAccount } from '../types';
 import { AddAccountModal } from './AddAccountModal';
 
 export function Sidebar() {
-  const { accounts, selectedAccount, isLoading, selectAccount } = useAccounts();
+  const { accounts, selectedAccount, isLoading } = useAccounts();
+  const navigate = useNavigate();
   const [showAddModal, setShowAddModal] = useState(false);
+
+  const handleSelectAccount = (account: TelegramAccount) => {
+    navigate(`/dashboard/${account.id}`);
+  };
 
   return (
     <>
@@ -43,7 +49,7 @@ export function Sidebar() {
                 key={account.id}
                 account={account}
                 isSelected={selectedAccount?.id === account.id}
-                onSelect={() => selectAccount(account)}
+                onSelect={() => handleSelectAccount(account)}
               />
             ))
           )}
@@ -80,6 +86,7 @@ interface AccountItemProps {
 
 function AccountItem({ account, isSelected, onSelect }: AccountItemProps) {
   const { removeAccount } = useAccounts();
+  const navigate = useNavigate();
   const [showMenu, setShowMenu] = useState(false);
 
   const displayName = [account.first_name, account.last_name]
@@ -90,6 +97,9 @@ function AccountItem({ account, isSelected, onSelect }: AccountItemProps) {
     e.stopPropagation();
     if (window.confirm(`Remove account "${displayName}"?`)) {
       await removeAccount(account.id);
+      if (isSelected) {
+        navigate('/dashboard', { replace: true });
+      }
     }
     setShowMenu(false);
   };

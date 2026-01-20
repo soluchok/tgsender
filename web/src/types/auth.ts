@@ -52,6 +52,8 @@ export interface Contact {
   first_name: string;
   last_name?: string;
   username?: string;
+  photo_url?: string;
+  labels?: string[];
   is_valid: boolean;
   created_at: string;
   updated_at: string;

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import { TelegramAccount, QRAuthState } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -25,7 +25,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [qrAuth, setQRAuth] = useState<QRAuthState>({ status: 'idle' });
-  const [pollInterval, setPollInterval] = useState<number | null>(null);
+  const pollIntervalRef = useRef<number | null>(null);
 
   const fetchAccounts = useCallback(async () => {
     try {
@@ -49,11 +49,43 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const selectAccount = useCallback((account: TelegramAccount | null) => {
+  const selectAccount = useCallback(async (account: TelegramAccount | null) => {
     setSelectedAccount(account);
+
+    if (account) {
+      // Validate session when selecting an account
+      try {
+        const response = await fetch(`${API_URL}/api/accounts/${account.id}/validate`, {
+          credentials: 'include',
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          // Update account in the list with new status and photo
+          if (data.account) {
+            const updates = {
+              is_active: data.is_active,
+              photo_url: data.account.photo_url || account.photo_url
+            };
+            setAccounts(prev => prev.map(a =>
+              a.id === account.id ? { ...a, ...updates } : a
+            ));
+            setSelectedAccount(prev => prev ? { ...prev, ...updates } : null);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to validate account:', err);
+      }
+    }
   }, []);
 
   const startQRAuth = useCallback(async () => {
+    // Cancel any existing polling first
+    if (pollIntervalRef.current) {
+      window.clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+
     try {
       setQRAuth({ status: 'pending' });
 
@@ -67,7 +99,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
       }
 
       const data = await response.json();
-      
+
       // Use status from server response
       setQRAuth({
         status: data.status || 'scanning',
@@ -89,6 +121,11 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
 
       // Start polling for QR scan result
       const interval = window.setInterval(async () => {
+        // Check if this interval is still the active one
+        if (pollIntervalRef.current !== interval) {
+          window.clearInterval(interval);
+          return;
+        }
         try {
           const pollResponse = await fetch(`${API_URL}/api/accounts/qr/status?token=${data.token}`, {
             credentials: 'include',
@@ -99,27 +136,26 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
             if (pollResponse.status === 404) {
               setQRAuth({ status: 'error', error: 'Session expired. Please try again.' });
               window.clearInterval(interval);
-              setPollInterval(null);
+              pollIntervalRef.current = null;
             }
             return;
           }
 
           const pollData = await pollResponse.json();
-          console.log('Poll response:', pollData);
 
           if (pollData.status === 'success') {
             setQRAuth({ status: 'success' });
             window.clearInterval(interval);
-            setPollInterval(null);
+            pollIntervalRef.current = null;
             fetchAccounts();
           } else if (pollData.status === 'error') {
             setQRAuth({ status: 'error', error: pollData.error });
             window.clearInterval(interval);
-            setPollInterval(null);
+            pollIntervalRef.current = null;
           } else if (pollData.status === 'expired') {
             setQRAuth({ status: 'error', error: 'QR code expired. Please try again.' });
             window.clearInterval(interval);
-            setPollInterval(null);
+            pollIntervalRef.current = null;
           } else if (pollData.status === 'password_required') {
             // 2FA required - update state but keep polling
             setQRAuth(prev => ({
@@ -130,6 +166,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
             // Update QR code if it changed (token refresh)
             setQRAuth(prev => ({
               ...prev,
+              status: pollData.status,
               qr_url: pollData.qr_url,
             }));
           }
@@ -139,7 +176,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
         }
       }, 2000);
 
-      setPollInterval(interval);
+      pollIntervalRef.current = interval;
     } catch (err) {
       setQRAuth({
         status: 'error',
@@ -149,12 +186,12 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
   }, [fetchAccounts]);
 
   const cancelQRAuth = useCallback(() => {
-    if (pollInterval) {
-      window.clearInterval(pollInterval);
-      setPollInterval(null);
+    if (pollIntervalRef.current) {
+      window.clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
     }
     setQRAuth({ status: 'idle' });
-  }, [pollInterval]);
+  }, []);
 
   const submitPassword = useCallback(async (password: string) => {
     try {
@@ -190,9 +227,9 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
 
       if (data.status === 'success') {
         setQRAuth({ status: 'success' });
-        if (pollInterval) {
-          window.clearInterval(pollInterval);
-          setPollInterval(null);
+        if (pollIntervalRef.current) {
+          window.clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
         }
         fetchAccounts();
       } else if (data.status === 'error') {
@@ -209,7 +246,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
         error: err instanceof Error ? err.message : 'Failed to submit password',
       }));
     }
-  }, [qrAuth.token, pollInterval, fetchAccounts]);
+  }, [qrAuth.token, fetchAccounts]);
 
   const removeAccount = useCallback(async (id: string) => {
     try {
@@ -234,11 +271,11 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
   // Cleanup polling on unmount
   useEffect(() => {
     return () => {
-      if (pollInterval) {
-        window.clearInterval(pollInterval);
+      if (pollIntervalRef.current) {
+        window.clearInterval(pollIntervalRef.current);
       }
     };
-  }, [pollInterval]);
+  }, []);
 
   // Fetch accounts on mount
   useEffect(() => {

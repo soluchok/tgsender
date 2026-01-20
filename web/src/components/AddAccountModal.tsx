@@ -16,11 +16,9 @@ export function AddAccountModal({ onClose }: AddAccountModalProps) {
       startQRAuth();
     }
 
-    // Cleanup on unmount
+    // Cleanup on unmount - always cancel to stop polling
     return () => {
-      if (qrAuth.status === 'scanning' || qrAuth.status === 'pending') {
-        cancelQRAuth();
-      }
+      cancelQRAuth();
     };
   }, []);
 

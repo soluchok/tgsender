@@ -2,12 +2,14 @@ package contacts
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
 
 	"github.com/gotd/td/telegram"
+	"github.com/gotd/td/telegram/downloader"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
 )
@@ -15,9 +17,16 @@ import (
 // CheckResult represents the result of checking phone numbers
 type CheckResult struct {
 	Valid   []*Contact `json:"valid"`   // Contacts that exist on Telegram
-	Invalid []string   `json:"invalid"` // Phone numbers not registered on Telegram
+	Invalid []string   `json:"invalid"` // Phone numbers/usernames not registered on Telegram
 	Retry   []string   `json:"retry"`   // Phone numbers that need retry (rate limited)
 	Errors  []string   `json:"errors"`  // Any errors that occurred
+}
+
+// CheckInput represents a mixed input of phones and usernames
+type CheckInput struct {
+	Phones    []string `json:"phones"`
+	Usernames []string `json:"usernames"`
+	Labels    []string `json:"labels"` // Custom labels to apply to contacts (if empty, auto-assigns based on input type)
 }
 
 // Checker handles phone number verification against Telegram
@@ -36,9 +45,9 @@ func NewChecker(store *Store, appID int, appHash string) *Checker {
 	}
 }
 
-// CheckNumbers verifies if phone numbers are registered on Telegram
+// CheckContacts verifies if phones/usernames are registered on Telegram
 // It uses the specified account's session to make the API calls
-func (c *Checker) CheckNumbers(ctx context.Context, accountID string, sessionPath string, phones []string) (*CheckResult, error) {
+func (c *Checker) CheckContacts(ctx context.Context, accountID string, sessionPath string, input *CheckInput) (*CheckResult, error) {
 	result := &CheckResult{
 		Valid:   make([]*Contact, 0),
 		Invalid: make([]string, 0),
@@ -46,7 +55,7 @@ func (c *Checker) CheckNumbers(ctx context.Context, accountID string, sessionPat
 		Errors:  make([]string, 0),
 	}
 
-	if len(phones) == 0 {
+	if len(input.Phones) == 0 && len(input.Usernames) == 0 {
 		return result, nil
 	}
 
@@ -82,25 +91,24 @@ func (c *Checker) CheckNumbers(ctx context.Context, accountID string, sessionPat
 			}
 		}
 
-		// Process phones in batches of 15 (Telegram limit)
-		batchSize := 15
-		for i := 0; i < len(phones); i += batchSize {
-			end := i + batchSize
-			if end > len(phones) {
-				end = len(phones)
-			}
-			batch := phones[i:end]
-
-			batchResult, err := c.checkBatch(ctx, client.API(), accountID, batch, existingContacts)
+		// Process phones if any
+		if len(input.Phones) > 0 {
+			phoneResult, err := c.checkPhones(ctx, client.API(), accountID, input.Phones, existingContacts, input.Labels)
 			if err != nil {
-				slog.Error("batch check failed", "error", err, "batch_start", i)
-				result.Errors = append(result.Errors, fmt.Sprintf("Batch %d failed: %s", i/batchSize+1, err.Error()))
-				continue
+				result.Errors = append(result.Errors, fmt.Sprintf("Phone check failed: %s", err.Error()))
+			} else {
+				result.Valid = append(result.Valid, phoneResult.Valid...)
+				result.Invalid = append(result.Invalid, phoneResult.Invalid...)
+				result.Retry = append(result.Retry, phoneResult.Retry...)
 			}
+		}
 
-			result.Valid = append(result.Valid, batchResult.Valid...)
-			result.Invalid = append(result.Invalid, batchResult.Invalid...)
-			result.Retry = append(result.Retry, batchResult.Retry...)
+		// Process usernames if any
+		if len(input.Usernames) > 0 {
+			usernameResult := c.resolveUsernames(ctx, client.API(), accountID, input.Usernames, input.Labels)
+			result.Valid = append(result.Valid, usernameResult.Valid...)
+			result.Invalid = append(result.Invalid, usernameResult.Invalid...)
+			result.Errors = append(result.Errors, usernameResult.Errors...)
 		}
 
 		return nil
@@ -130,7 +138,130 @@ func (c *Checker) CheckNumbers(ctx context.Context, accountID string, sessionPat
 	return result, nil
 }
 
-func (c *Checker) checkBatch(ctx context.Context, api *tg.Client, accountID string, phones []string, existingContacts map[int64]bool) (*CheckResult, error) {
+// checkPhones verifies phone numbers in batches
+func (c *Checker) checkPhones(ctx context.Context, api *tg.Client, accountID string, phones []string, existingContacts map[int64]bool, labels []string) (*CheckResult, error) {
+	result := &CheckResult{
+		Valid:   make([]*Contact, 0),
+		Invalid: make([]string, 0),
+		Retry:   make([]string, 0),
+		Errors:  make([]string, 0),
+	}
+
+	// Process phones in batches of 15 (Telegram limit)
+	batchSize := 15
+	for i := 0; i < len(phones); i += batchSize {
+		end := i + batchSize
+		if end > len(phones) {
+			end = len(phones)
+		}
+		batch := phones[i:end]
+
+		batchResult, err := c.checkBatch(ctx, api, accountID, batch, existingContacts, labels)
+		if err != nil {
+			slog.Error("batch check failed", "error", err, "batch_start", i)
+			result.Errors = append(result.Errors, fmt.Sprintf("Batch %d failed: %s", i/batchSize+1, err.Error()))
+			continue
+		}
+
+		result.Valid = append(result.Valid, batchResult.Valid...)
+		result.Invalid = append(result.Invalid, batchResult.Invalid...)
+		result.Retry = append(result.Retry, batchResult.Retry...)
+	}
+
+	return result, nil
+}
+
+// resolveUsernames resolves Telegram usernames to contacts
+func (c *Checker) resolveUsernames(ctx context.Context, api *tg.Client, accountID string, usernames []string, labels []string) *CheckResult {
+	result := &CheckResult{
+		Valid:   make([]*Contact, 0),
+		Invalid: make([]string, 0),
+		Errors:  make([]string, 0),
+	}
+
+	for _, username := range usernames {
+		// Remove @ prefix if present
+		username = strings.TrimPrefix(username, "@")
+		if username == "" {
+			continue
+		}
+
+		resolved, err := c.resolveUsernameWithRetry(ctx, api, username)
+		if err != nil {
+			// Check if it's a "not found" error
+			if tgerr.Is(err, "USERNAME_NOT_OCCUPIED") || tgerr.Is(err, "USERNAME_INVALID") {
+				result.Invalid = append(result.Invalid, "@"+username)
+				continue
+			}
+			slog.Error("failed to resolve username", "username", username, "error", err)
+			result.Errors = append(result.Errors, fmt.Sprintf("@%s: %s", username, err.Error()))
+			continue
+		}
+
+		// Extract user from resolved peer
+		for _, userClass := range resolved.GetUsers() {
+			user, ok := userClass.AsNotEmpty()
+			if !ok {
+				continue
+			}
+
+			// Only add if username matches (peer might be a channel/chat)
+			if strings.EqualFold(user.Username, username) {
+				photoURL := downloadUserPhoto(ctx, api, user)
+				contact := &Contact{
+					AccountID:  accountID,
+					TelegramID: user.ID,
+					AccessHash: user.AccessHash,
+					Phone:      user.Phone,
+					FirstName:  user.FirstName,
+					LastName:   user.LastName,
+					Username:   user.Username,
+					PhotoURL:   photoURL,
+					Labels:     labels,
+					IsValid:    true,
+				}
+				result.Valid = append(result.Valid, contact)
+				break
+			}
+		}
+
+		// If no user was added, mark as invalid (might be a channel/chat)
+		if len(result.Valid) == 0 || result.Valid[len(result.Valid)-1].Username != username {
+			// Check if we already added this user
+			found := false
+			for _, v := range result.Valid {
+				if strings.EqualFold(v.Username, username) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				result.Invalid = append(result.Invalid, "@"+username)
+			}
+		}
+	}
+
+	return result
+}
+
+func (c *Checker) resolveUsernameWithRetry(ctx context.Context, api *tg.Client, username string) (*tg.ContactsResolvedPeer, error) {
+	resolved, err := api.ContactsResolveUsername(ctx, username)
+	if err == nil {
+		return resolved, nil
+	}
+
+	// Handle flood wait
+	if flood, floodErr := tgerr.FloodWait(ctx, err); flood {
+		slog.Info("flood wait on resolve username, retrying...", "username", username)
+		return c.resolveUsernameWithRetry(ctx, api, username)
+	} else if floodErr != nil {
+		return nil, floodErr
+	}
+
+	return nil, err
+}
+
+func (c *Checker) checkBatch(ctx context.Context, api *tg.Client, accountID string, phones []string, existingContacts map[int64]bool, labels []string) (*CheckResult, error) {
 	result := &CheckResult{
 		Valid:   make([]*Contact, 0),
 		Invalid: make([]string, 0),
@@ -165,6 +296,7 @@ func (c *Checker) checkBatch(ctx context.Context, api *tg.Client, accountID stri
 
 		foundPhones[user.Phone] = true
 
+		photoURL := downloadUserPhoto(ctx, api, user)
 		contact := &Contact{
 			AccountID:  accountID,
 			TelegramID: user.ID,
@@ -173,6 +305,8 @@ func (c *Checker) checkBatch(ctx context.Context, api *tg.Client, accountID stri
 			FirstName:  user.FirstName,
 			LastName:   user.LastName,
 			Username:   user.Username,
+			PhotoURL:   photoURL,
+			Labels:     labels,
 			IsValid:    true,
 		}
 		result.Valid = append(result.Valid, contact)
@@ -236,4 +370,516 @@ func (c *Checker) importContactsWithRetry(ctx context.Context, api *tg.Client, c
 	}
 
 	return nil, err
+}
+
+// ChatContactsResult represents the result of importing contacts from chats
+type ChatContactsResult struct {
+	Imported int      `json:"imported"` // Number of contacts imported
+	Skipped  int      `json:"skipped"`  // Number of contacts skipped (already exist or no access)
+	Errors   []string `json:"errors"`   // Any errors that occurred
+}
+
+// ImportFromChats imports contacts from all dialogs (private chats) of the account
+func (c *Checker) ImportFromChats(ctx context.Context, accountID string, sessionPath string) (*ChatContactsResult, error) {
+	result := &ChatContactsResult{
+		Errors: make([]string, 0),
+	}
+
+	// Check if session file exists
+	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("session not found - please re-authenticate this account")
+	}
+
+	sessionStorage := &telegram.FileSessionStorage{
+		Path: sessionPath,
+	}
+
+	client := telegram.NewClient(c.appID, c.appHash, telegram.Options{
+		SessionStorage: sessionStorage,
+	})
+
+	err := client.Run(ctx, func(ctx context.Context) error {
+		// Get existing contacts from our store to check for duplicates
+		existingContacts := make(map[int64]bool)
+		for _, contact := range c.store.GetByAccount(accountID) {
+			existingContacts[contact.TelegramID] = true
+		}
+
+		// Get all dialogs
+		var allUsers []*tg.User
+		var offsetDate int
+		var offsetID int
+		var offsetPeer tg.InputPeerClass = &tg.InputPeerEmpty{}
+
+		for {
+			resp, err := c.getDialogsWithRetry(ctx, client.API(), &tg.MessagesGetDialogsRequest{
+				OffsetDate: offsetDate,
+				OffsetID:   offsetID,
+				OffsetPeer: offsetPeer,
+				Limit:      100,
+			})
+			if err != nil {
+				if tgerr.Is(err, "AUTH_KEY_UNREGISTERED") || tgerr.Is(err, "SESSION_REVOKED") {
+					return fmt.Errorf("session expired - please re-authenticate")
+				}
+				return fmt.Errorf("failed to get dialogs: %w", err)
+			}
+
+			var dialogs []tg.DialogClass
+			var users []tg.UserClass
+			var messages []tg.MessageClass
+
+			switch d := resp.(type) {
+			case *tg.MessagesDialogs:
+				dialogs = d.Dialogs
+				users = d.Users
+				messages = d.Messages
+			case *tg.MessagesDialogsSlice:
+				dialogs = d.Dialogs
+				users = d.Users
+				messages = d.Messages
+			case *tg.MessagesDialogsNotModified:
+				// No changes
+				break
+			}
+
+			if len(dialogs) == 0 {
+				break
+			}
+
+			// Build user map
+			userMap := make(map[int64]*tg.User)
+			for _, u := range users {
+				if user, ok := u.AsNotEmpty(); ok {
+					userMap[user.ID] = user
+				}
+			}
+
+			// Extract users from private chats
+			for _, dialog := range dialogs {
+				d, ok := dialog.(*tg.Dialog)
+				if !ok {
+					continue
+				}
+
+				// Only process private chats (not groups/channels)
+				if peerUser, ok := d.Peer.(*tg.PeerUser); ok {
+					if user, exists := userMap[peerUser.UserID]; exists {
+						// Skip bots and deleted accounts
+						if user.Bot || user.Deleted {
+							continue
+						}
+						allUsers = append(allUsers, user)
+					}
+				}
+			}
+
+			// Check if we got all dialogs
+			if len(dialogs) < 100 {
+				break
+			}
+
+			// Update offset for next iteration
+			if len(messages) > 0 {
+				lastMsg := messages[len(messages)-1]
+				if msg, ok := lastMsg.(*tg.Message); ok {
+					offsetDate = msg.Date
+					offsetID = msg.ID
+				}
+			}
+			if len(dialogs) > 0 {
+				lastDialog := dialogs[len(dialogs)-1]
+				if d, ok := lastDialog.(*tg.Dialog); ok {
+					switch p := d.Peer.(type) {
+					case *tg.PeerUser:
+						if user, exists := userMap[p.UserID]; exists {
+							offsetPeer = user.AsInputPeer()
+						}
+					}
+				}
+			}
+		}
+
+		// Import users as contacts
+		var contactsToSave []*Contact
+		for _, user := range allUsers {
+			// Skip if already exists
+			if existingContacts[user.ID] {
+				result.Skipped++
+				continue
+			}
+
+			photoURL := downloadUserPhoto(ctx, client.API(), user)
+			contact := &Contact{
+				AccountID:  accountID,
+				TelegramID: user.ID,
+				AccessHash: user.AccessHash,
+				Phone:      user.Phone,
+				FirstName:  user.FirstName,
+				LastName:   user.LastName,
+				Username:   user.Username,
+				PhotoURL:   photoURL,
+				Labels:     []string{"chat"},
+				IsValid:    true,
+			}
+			contactsToSave = append(contactsToSave, contact)
+			existingContacts[user.ID] = true // Mark as seen to avoid duplicates
+		}
+
+		// Save contacts to store
+		if len(contactsToSave) > 0 {
+			if err := c.store.BulkCreateOrUpdate(contactsToSave); err != nil {
+				slog.Error("failed to save contacts from chats", "error", err)
+				result.Errors = append(result.Errors, "Failed to save some contacts")
+			} else {
+				result.Imported = len(contactsToSave)
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "AUTH_KEY_UNREGISTERED") || strings.Contains(errStr, "SESSION_REVOKED") {
+			return nil, fmt.Errorf("session expired - please re-authenticate this account")
+		}
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// ImportFromChatsWithProgress imports contacts from all dialogs with progress callback
+func (c *Checker) ImportFromChatsWithProgress(ctx context.Context, accountID string, sessionPath string, onProgress func(progress, imported, skipped int)) (*ChatContactsResult, error) {
+	result := &ChatContactsResult{
+		Errors: make([]string, 0),
+	}
+
+	// Check if session file exists
+	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("session not found - please re-authenticate this account")
+	}
+
+	sessionStorage := &telegram.FileSessionStorage{
+		Path: sessionPath,
+	}
+
+	client := telegram.NewClient(c.appID, c.appHash, telegram.Options{
+		SessionStorage: sessionStorage,
+	})
+
+	err := client.Run(ctx, func(ctx context.Context) error {
+		// Get existing contacts from our store to check for duplicates
+		existingContacts := make(map[int64]bool)
+		for _, contact := range c.store.GetByAccount(accountID) {
+			existingContacts[contact.TelegramID] = true
+		}
+
+		// Get all dialogs
+		var allUsers []*tg.User
+		var offsetDate int
+		var offsetID int
+		var offsetPeer tg.InputPeerClass = &tg.InputPeerEmpty{}
+		dialogsProcessed := 0
+		seenDialogs := make(map[int64]bool) // Track seen dialog peer IDs to detect loops
+		const batchLimit = 100
+
+		for {
+			resp, err := c.getDialogsWithRetry(ctx, client.API(), &tg.MessagesGetDialogsRequest{
+				OffsetDate: offsetDate,
+				OffsetID:   offsetID,
+				OffsetPeer: offsetPeer,
+				Limit:      batchLimit,
+			})
+			if err != nil {
+				if tgerr.Is(err, "AUTH_KEY_UNREGISTERED") || tgerr.Is(err, "SESSION_REVOKED") {
+					return fmt.Errorf("session expired - please re-authenticate")
+				}
+				return fmt.Errorf("failed to get dialogs: %w", err)
+			}
+
+			var dialogs []tg.DialogClass
+			var users []tg.UserClass
+			var messages []tg.MessageClass
+			var chats []tg.ChatClass
+			var isComplete bool
+
+			switch d := resp.(type) {
+			case *tg.MessagesDialogs:
+				// All dialogs returned at once - no more pagination needed
+				dialogs = d.Dialogs
+				users = d.Users
+				messages = d.Messages
+				chats = d.Chats
+				isComplete = true
+			case *tg.MessagesDialogsSlice:
+				dialogs = d.Dialogs
+				users = d.Users
+				messages = d.Messages
+				chats = d.Chats
+				// Check if we've fetched all dialogs
+				isComplete = dialogsProcessed+len(dialogs) >= d.Count
+			case *tg.MessagesDialogsNotModified:
+				// No changes
+				isComplete = true
+			}
+
+			if len(dialogs) == 0 {
+				break
+			}
+
+			// Check for duplicate dialogs (pagination loop detection)
+			// Only mark as seen AFTER processing, and break only if ALL dialogs were seen before
+			allSeen := true
+			for _, dialog := range dialogs {
+				if d, ok := dialog.(*tg.Dialog); ok {
+					peerID := getPeerID(d.Peer)
+					if !seenDialogs[peerID] {
+						allSeen = false
+					}
+				}
+			}
+			// If ALL dialogs were already seen, we're definitely in a loop
+			if allSeen && len(dialogs) > 0 {
+				slog.Info("pagination loop detected - all dialogs already seen", "count", len(dialogs))
+				break
+			}
+
+			// Mark dialogs as seen
+			for _, dialog := range dialogs {
+				if d, ok := dialog.(*tg.Dialog); ok {
+					peerID := getPeerID(d.Peer)
+					seenDialogs[peerID] = true
+				}
+			}
+
+			dialogsProcessed += len(dialogs)
+
+			// Build user map
+			userMap := make(map[int64]*tg.User)
+			for _, u := range users {
+				if user, ok := u.AsNotEmpty(); ok {
+					userMap[user.ID] = user
+				}
+			}
+
+			// Build chat/channel maps for offset peer resolution
+			chatMap := make(map[int64]*tg.Chat)
+			channelMap := make(map[int64]*tg.Channel)
+			for _, chatClass := range chats {
+				switch chat := chatClass.(type) {
+				case *tg.Chat:
+					chatMap[chat.ID] = chat
+				case *tg.Channel:
+					channelMap[chat.ID] = chat
+				}
+			}
+
+			// Extract users from private chats
+			for _, dialog := range dialogs {
+				d, ok := dialog.(*tg.Dialog)
+				if !ok {
+					continue
+				}
+
+				// Only process private chats (not groups/channels)
+				if peerUser, ok := d.Peer.(*tg.PeerUser); ok {
+					if user, exists := userMap[peerUser.UserID]; exists {
+						// Skip bots and deleted accounts
+						if user.Bot || user.Deleted {
+							continue
+						}
+						allUsers = append(allUsers, user)
+					}
+				}
+			}
+
+			// Calculate current imported/skipped for progress
+			currentImported := 0
+			currentSkipped := 0
+			for _, user := range allUsers {
+				if existingContacts[user.ID] {
+					currentSkipped++
+				} else {
+					currentImported++
+				}
+			}
+
+			// Report progress after each batch
+			if onProgress != nil {
+				onProgress(dialogsProcessed, currentImported, currentSkipped)
+			}
+
+			// Check if we've got all dialogs
+			if isComplete || len(dialogs) < batchLimit {
+				break
+			}
+
+			// Update offset for next iteration using the last dialog
+			lastDialog := dialogs[len(dialogs)-1]
+			if d, ok := lastDialog.(*tg.Dialog); ok {
+				// Build a map of messages by their peer for easier lookup
+				// Messages in the response correspond to the top message of each dialog
+				messageMap := make(map[int]tg.MessageClass)
+				for _, msgClass := range messages {
+					switch msg := msgClass.(type) {
+					case *tg.Message:
+						messageMap[msg.ID] = msg
+					case *tg.MessageService:
+						messageMap[msg.ID] = msg
+					}
+				}
+
+				// Find the message for the last dialog's top message
+				if msgClass, exists := messageMap[d.TopMessage]; exists {
+					switch msg := msgClass.(type) {
+					case *tg.Message:
+						offsetDate = msg.Date
+						offsetID = msg.ID
+					case *tg.MessageService:
+						offsetDate = msg.Date
+						offsetID = msg.ID
+					}
+				} else {
+					// Fallback: use the last message in the list
+					if len(messages) > 0 {
+						switch msg := messages[len(messages)-1].(type) {
+						case *tg.Message:
+							offsetDate = msg.Date
+							offsetID = msg.ID
+						case *tg.MessageService:
+							offsetDate = msg.Date
+							offsetID = msg.ID
+						}
+					}
+				}
+
+				// Set offset peer based on dialog peer type
+				switch p := d.Peer.(type) {
+				case *tg.PeerUser:
+					if user, exists := userMap[p.UserID]; exists {
+						offsetPeer = user.AsInputPeer()
+					}
+				case *tg.PeerChat:
+					if chat, exists := chatMap[p.ChatID]; exists {
+						offsetPeer = chat.AsInputPeer()
+					}
+				case *tg.PeerChannel:
+					if channel, exists := channelMap[p.ChannelID]; exists {
+						offsetPeer = channel.AsInputPeer()
+					}
+				}
+			}
+		}
+
+		// Import users as contacts (download photos while we still have the client)
+		var contactsToSave []*Contact
+		for _, user := range allUsers {
+			// Skip if already exists
+			if existingContacts[user.ID] {
+				result.Skipped++
+				continue
+			}
+
+			// Download profile photo
+			photoURL := downloadUserPhoto(ctx, client.API(), user)
+
+			contact := &Contact{
+				AccountID:  accountID,
+				TelegramID: user.ID,
+				AccessHash: user.AccessHash,
+				Phone:      user.Phone,
+				FirstName:  user.FirstName,
+				LastName:   user.LastName,
+				Username:   user.Username,
+				PhotoURL:   photoURL,
+				Labels:     []string{"chat"},
+				IsValid:    true,
+			}
+			contactsToSave = append(contactsToSave, contact)
+			existingContacts[user.ID] = true // Mark as seen to avoid duplicates
+		}
+
+		// Save contacts to store
+		if len(contactsToSave) > 0 {
+			if err := c.store.BulkCreateOrUpdate(contactsToSave); err != nil {
+				slog.Error("failed to save contacts from chats", "error", err)
+				result.Errors = append(result.Errors, "Failed to save some contacts")
+			} else {
+				result.Imported = len(contactsToSave)
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "AUTH_KEY_UNREGISTERED") || strings.Contains(errStr, "SESSION_REVOKED") {
+			return nil, fmt.Errorf("session expired - please re-authenticate this account")
+		}
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func (c *Checker) getDialogsWithRetry(ctx context.Context, api *tg.Client, req *tg.MessagesGetDialogsRequest) (tg.MessagesDialogsClass, error) {
+	resp, err := api.MessagesGetDialogs(ctx, req)
+	if err == nil {
+		return resp, nil
+	}
+
+	// Handle flood wait
+	if flood, floodErr := tgerr.FloodWait(ctx, err); flood {
+		slog.Info("flood wait on get dialogs, retrying...", "error", err)
+		return c.getDialogsWithRetry(ctx, api, req)
+	} else if floodErr != nil {
+		return nil, floodErr
+	}
+
+	return nil, err
+}
+
+// getPeerID extracts the ID from a peer
+func getPeerID(peer tg.PeerClass) int64 {
+	switch p := peer.(type) {
+	case *tg.PeerUser:
+		return p.UserID
+	case *tg.PeerChat:
+		return p.ChatID
+	case *tg.PeerChannel:
+		return p.ChannelID
+	}
+	return 0
+}
+
+// downloadUserPhoto downloads the profile photo for a user and returns base64 encoded data URL
+func downloadUserPhoto(ctx context.Context, api *tg.Client, user *tg.User) string {
+	if user.Photo == nil {
+		return "" // No photo set
+	}
+
+	photo, ok := user.Photo.AsNotEmpty()
+	if !ok {
+		return "" // No photo set
+	}
+
+	d := downloader.NewDownloader()
+	var buf strings.Builder
+	writer := base64.NewEncoder(base64.StdEncoding, &buf)
+
+	_, err := d.Download(api, &tg.InputPeerPhotoFileLocation{
+		Peer:    user.AsInputPeer(),
+		PhotoID: photo.PhotoID,
+	}).Stream(ctx, writer)
+	writer.Close()
+
+	if err != nil {
+		slog.Debug("failed to download user photo", "userID", user.ID, "error", err)
+		return ""
+	}
+
+	return "data:image/jpeg;base64," + buf.String()
 }

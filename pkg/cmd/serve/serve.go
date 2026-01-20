@@ -75,8 +75,11 @@ func New() *cobra.Command {
 			// Initialize QR auth manager
 			qrManager := accounts.NewQRAuthManager(accountStore, cfg.AppID, cfg.AppHash)
 
+			// Initialize session validator
+			accountValidator := accounts.NewValidator(accountStore, cfg.AppID, cfg.AppHash)
+
 			// Initialize accounts handler
-			accountsHandler := accounts.NewHandler(accountStore, qrManager, authHandler)
+			accountsHandler := accounts.NewHandler(accountStore, qrManager, accountValidator, authHandler)
 
 			// Initialize contacts store and handler
 			contactStore, err := contacts.NewStore(".data")
@@ -84,7 +87,8 @@ func New() *cobra.Command {
 				return err
 			}
 			contactChecker := contacts.NewChecker(contactStore, cfg.AppID, cfg.AppHash)
-			contactsHandler := contacts.NewHandler(contactStore, contactChecker, accountStore, authHandler)
+			jobManager := contacts.NewJobManager(contactChecker)
+			contactsHandler := contacts.NewHandler(contactStore, contactChecker, accountStore, authHandler, jobManager)
 
 			var mux = http.NewServeMux()
 
@@ -96,6 +100,7 @@ func New() *cobra.Command {
 			// Accounts routes
 			mux.HandleFunc("/api/accounts", accountsHandler.HandleListAccounts)
 			mux.HandleFunc("/api/accounts/{id}", accountsHandler.HandleDeleteAccount)
+			mux.HandleFunc("/api/accounts/{id}/validate", accountsHandler.HandleValidateAccount)
 			mux.HandleFunc("/api/accounts/qr/start", accountsHandler.HandleStartQRAuth)
 			mux.HandleFunc("/api/accounts/qr/status", accountsHandler.HandleQRAuthStatus)
 			mux.HandleFunc("/api/accounts/qr/cancel", accountsHandler.HandleCancelQRAuth)
@@ -104,6 +109,8 @@ func New() *cobra.Command {
 			// Contacts routes
 			mux.HandleFunc("/api/accounts/{id}/check-numbers", contactsHandler.HandleCheckNumbers)
 			mux.HandleFunc("/api/accounts/{id}/contacts", contactsHandler.HandleListContacts)
+			mux.HandleFunc("/api/accounts/{id}/import-chats", contactsHandler.HandleImportFromChats)
+			mux.HandleFunc("/api/accounts/{id}/import-chats/status", contactsHandler.HandleImportFromChatsStatus)
 			mux.HandleFunc("/api/contacts/{id}", contactsHandler.HandleDeleteContact)
 
 			// Messages routes

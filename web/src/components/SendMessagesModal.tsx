@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { TelegramAccount, Contact } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -30,12 +30,55 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
   const [isSending, setIsSending] = useState(false);
   const [result, setResult] = useState<SendResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set());
+
+  // Extract unique labels from all contacts
+  const availableLabels = useMemo(() => {
+    const labels = new Set<string>();
+    contacts.forEach(contact => {
+      contact.labels?.forEach(label => labels.add(label));
+    });
+    return Array.from(labels).sort();
+  }, [contacts]);
+
+  // Filter contacts based on selected labels
+  const filteredContacts = useMemo(() => {
+    if (selectedLabels.size === 0) {
+      return contacts;
+    }
+    return contacts.filter(contact => 
+      contact.labels?.some(label => selectedLabels.has(label))
+    );
+  }, [contacts, selectedLabels]);
+
+  const handleToggleLabel = (label: string) => {
+    const newLabels = new Set(selectedLabels);
+    if (newLabels.has(label)) {
+      newLabels.delete(label);
+    } else {
+      newLabels.add(label);
+    }
+    setSelectedLabels(newLabels);
+    
+    // Update selected contacts to only include filtered contacts
+    const filteredIds = new Set(
+      contacts
+        .filter(c => newLabels.size === 0 || c.labels?.some(l => newLabels.has(l)))
+        .map(c => c.id)
+    );
+    setSelectedIds(filteredIds);
+  };
+
+  const handleClearLabelFilter = () => {
+    setSelectedLabels(new Set());
+    setSelectedIds(new Set(contacts.map(c => c.id)));
+  };
 
   const handleSelectAll = () => {
-    if (selectedIds.size === contacts.length) {
+    if (selectedIds.size === filteredContacts.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(contacts.map(c => c.id)));
+      setSelectedIds(new Set(filteredContacts.map(c => c.id)));
     }
   };
 
@@ -96,7 +139,7 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
     onClose();
   };
 
-  const allSelected = selectedIds.size === contacts.length;
+  const allSelected = selectedIds.size === filteredContacts.length && filteredContacts.length > 0;
   const noneSelected = selectedIds.size === 0;
 
   return (
@@ -136,6 +179,33 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
                     />
                   </div>
 
+                  {availableLabels.length > 0 && (
+                    <div className="form-group">
+                      <label>Filter by Labels</label>
+                      <div className="label-filter">
+                        {availableLabels.map(label => (
+                          <button
+                            key={label}
+                            className={`label-filter-btn ${selectedLabels.has(label) ? 'active' : ''}`}
+                            onClick={() => handleToggleLabel(label)}
+                            disabled={isSending}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                        {selectedLabels.size > 0 && (
+                          <button
+                            className="label-filter-clear"
+                            onClick={handleClearLabelFilter}
+                            disabled={isSending}
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="contacts-selection">
                     <div className="selection-header">
                       <label>
@@ -145,7 +215,7 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
                           onChange={handleSelectAll}
                           disabled={isSending}
                         />
-                        <span>Select All ({contacts.length} contacts)</span>
+                        <span>Select All ({filteredContacts.length} contacts)</span>
                       </label>
                       <span className="selected-count">
                         {selectedIds.size} selected
@@ -153,7 +223,7 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
                     </div>
 
                     <div className="contacts-list selectable">
-                      {contacts.map((contact) => (
+                      {filteredContacts.map((contact) => (
                         <ContactSelectItem
                           key={contact.id}
                           contact={contact}
