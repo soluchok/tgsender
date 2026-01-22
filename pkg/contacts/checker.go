@@ -503,10 +503,10 @@ func (c *Checker) ImportFromChats(ctx context.Context, accountID string, session
 		// Import users as contacts
 		var contactsToSave []*Contact
 		for _, user := range allUsers {
-			// Skip if already exists
-			if existingContacts[user.ID] {
+			// Check if already exists - we'll still save to merge labels
+			isExisting := existingContacts[user.ID]
+			if isExisting {
 				result.Skipped++
-				continue
 			}
 
 			photoURL := downloadUserPhoto(ctx, client.API(), user)
@@ -523,16 +523,16 @@ func (c *Checker) ImportFromChats(ctx context.Context, accountID string, session
 				IsValid:    true,
 			}
 			contactsToSave = append(contactsToSave, contact)
-			existingContacts[user.ID] = true // Mark as seen to avoid duplicates
+			existingContacts[user.ID] = true // Mark as seen to avoid duplicates in this batch
 		}
 
-		// Save contacts to store
+		// Save contacts to store (BulkCreateOrUpdate will merge labels for duplicates)
 		if len(contactsToSave) > 0 {
 			if err := c.store.BulkCreateOrUpdate(contactsToSave); err != nil {
 				slog.Error("failed to save contacts from chats", "error", err)
 				result.Errors = append(result.Errors, "Failed to save some contacts")
 			} else {
-				result.Imported = len(contactsToSave)
+				result.Imported = len(contactsToSave) - result.Skipped
 			}
 		}
 
@@ -776,10 +776,10 @@ func (c *Checker) ImportFromChatsWithProgress(ctx context.Context, accountID str
 		// Import users as contacts (download photos while we still have the client)
 		var contactsToSave []*Contact
 		for _, user := range allUsers {
-			// Skip if already exists
-			if existingContacts[user.ID] {
+			// Check if already exists - we'll still save to merge labels
+			isExisting := existingContacts[user.ID]
+			if isExisting {
 				result.Skipped++
-				continue
 			}
 
 			// Download profile photo
@@ -798,16 +798,16 @@ func (c *Checker) ImportFromChatsWithProgress(ctx context.Context, accountID str
 				IsValid:    true,
 			}
 			contactsToSave = append(contactsToSave, contact)
-			existingContacts[user.ID] = true // Mark as seen to avoid duplicates
+			existingContacts[user.ID] = true // Mark as seen to avoid duplicates in this batch
 		}
 
-		// Save contacts to store
+		// Save contacts to store (BulkCreateOrUpdate will merge labels for duplicates)
 		if len(contactsToSave) > 0 {
 			if err := c.store.BulkCreateOrUpdate(contactsToSave); err != nil {
 				slog.Error("failed to save contacts from chats", "error", err)
 				result.Errors = append(result.Errors, "Failed to save some contacts")
 			} else {
-				result.Imported = len(contactsToSave)
+				result.Imported = len(contactsToSave) - result.Skipped
 			}
 		}
 
@@ -823,6 +823,138 @@ func (c *Checker) ImportFromChatsWithProgress(ctx context.Context, accountID str
 	}
 
 	return result, nil
+}
+
+// ImportFromContacts imports contacts from Telegram's contact list
+func (c *Checker) ImportFromContacts(ctx context.Context, accountID string, sessionPath string, onProgress func(imported, skipped int)) (*ChatContactsResult, error) {
+	result := &ChatContactsResult{
+		Errors: make([]string, 0),
+	}
+
+	// Check if session file exists
+	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("session not found - please re-authenticate this account")
+	}
+
+	sessionStorage := &telegram.FileSessionStorage{
+		Path: sessionPath,
+	}
+
+	client := telegram.NewClient(c.appID, c.appHash, telegram.Options{
+		SessionStorage: sessionStorage,
+	})
+
+	err := client.Run(ctx, func(ctx context.Context) error {
+		// Get existing contacts from our store to check for duplicates
+		existingContacts := make(map[int64]bool)
+		for _, contact := range c.store.GetByAccount(accountID) {
+			existingContacts[contact.TelegramID] = true
+		}
+
+		// Get contacts from Telegram
+		resp, err := c.getContactsWithRetry(ctx, client.API())
+		if err != nil {
+			if tgerr.Is(err, "AUTH_KEY_UNREGISTERED") || tgerr.Is(err, "SESSION_REVOKED") {
+				return fmt.Errorf("session expired - please re-authenticate")
+			}
+			return fmt.Errorf("failed to get contacts: %w", err)
+		}
+
+		contacts, ok := resp.(*tg.ContactsContacts)
+		if !ok {
+			// ContactsContactsNotModified means no contacts
+			return nil
+		}
+
+		// Build user map
+		userMap := make(map[int64]*tg.User)
+		for _, u := range contacts.Users {
+			if user, ok := u.AsNotEmpty(); ok {
+				userMap[user.ID] = user
+			}
+		}
+
+		// Import contacts
+		var contactsToSave []*Contact
+		for _, tgContact := range contacts.Contacts {
+			user, exists := userMap[tgContact.UserID]
+			if !exists {
+				continue
+			}
+
+			// Skip bots and deleted accounts
+			if user.Bot || user.Deleted {
+				continue
+			}
+
+			// Check if already exists - we'll still save to merge labels
+			isExisting := existingContacts[user.ID]
+			if isExisting {
+				result.Skipped++
+			}
+
+			// Download profile photo
+			photoURL := downloadUserPhoto(ctx, client.API(), user)
+
+			contact := &Contact{
+				AccountID:  accountID,
+				TelegramID: user.ID,
+				AccessHash: user.AccessHash,
+				Phone:      user.Phone,
+				FirstName:  user.FirstName,
+				LastName:   user.LastName,
+				Username:   user.Username,
+				PhotoURL:   photoURL,
+				Labels:     []string{"contact"},
+				IsValid:    true,
+			}
+			contactsToSave = append(contactsToSave, contact)
+			existingContacts[user.ID] = true
+
+			if onProgress != nil {
+				onProgress(len(contactsToSave)-result.Skipped, result.Skipped)
+			}
+		}
+
+		// Save contacts to store (BulkCreateOrUpdate will merge labels for duplicates)
+		if len(contactsToSave) > 0 {
+			if err := c.store.BulkCreateOrUpdate(contactsToSave); err != nil {
+				slog.Error("failed to save contacts", "error", err)
+				result.Errors = append(result.Errors, "Failed to save some contacts")
+			} else {
+				result.Imported = len(contactsToSave) - result.Skipped
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "AUTH_KEY_UNREGISTERED") || strings.Contains(errStr, "SESSION_REVOKED") {
+			return nil, fmt.Errorf("session expired - please re-authenticate this account")
+		}
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func (c *Checker) getContactsWithRetry(ctx context.Context, api *tg.Client) (tg.ContactsContactsClass, error) {
+	resp, err := api.ContactsGetContacts(ctx, 0)
+	if err == nil {
+		return resp, nil
+	}
+
+	// Handle flood wait
+	if flood, floodErr := tgerr.FloodWait(ctx, err); flood {
+		slog.Info("flood wait on get contacts, retrying...", "error", err)
+		return c.getContactsWithRetry(ctx, api)
+	} else if floodErr != nil {
+		return nil, floodErr
+	}
+
+	return nil, err
 }
 
 func (c *Checker) getDialogsWithRetry(ctx context.Context, api *tg.Client, req *tg.MessagesGetDialogsRequest) (tg.MessagesDialogsClass, error) {

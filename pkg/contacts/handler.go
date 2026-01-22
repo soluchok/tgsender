@@ -298,6 +298,59 @@ func (h *Handler) HandleImportFromChats(w http.ResponseWriter, r *http.Request) 
 	}, http.StatusOK)
 }
 
+// HandleImportContacts handles POST /api/accounts/{id}/import-contacts
+func (h *Handler) HandleImportContacts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ownerID, ok := h.getOwnerID(r)
+	if !ok {
+		writeJSONError(w, "Not authenticated", http.StatusUnauthorized)
+		return
+	}
+
+	// Get account ID from path
+	accountID := r.PathValue("id")
+	if accountID == "" {
+		writeJSONError(w, "Account ID required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify account exists and belongs to this owner
+	account, ok := h.accountStore.Get(accountID)
+	if !ok {
+		writeJSONError(w, "Account not found", http.StatusNotFound)
+		return
+	}
+
+	if account.OwnerID != ownerID {
+		writeJSONError(w, "Unauthorized", http.StatusForbidden)
+		return
+	}
+
+	// Get session path for this account
+	sessionPath := fmt.Sprintf(".session/account_%s.json", account.SessionToken)
+	if account.SessionToken == "" {
+		sessionPath = fmt.Sprintf(".session/account_%s.json", accountID)
+	}
+
+	// Start async import job
+	job, isNew := h.jobManager.StartImportContacts(accountID, sessionPath)
+
+	writeJSON(w, map[string]interface{}{
+		"id":          job.ID,
+		"account_id":  job.AccountID,
+		"import_type": job.ImportType,
+		"status":      job.Status,
+		"progress":    job.Progress,
+		"imported":    job.Imported,
+		"skipped":     job.Skipped,
+		"is_new":      isNew,
+	}, http.StatusOK)
+}
+
 // HandleImportFromChatsStatus handles GET /api/accounts/{id}/import-chats/status
 // If job_id is provided, returns that specific job's status
 // If job_id is not provided, returns the active job for the account (if any)

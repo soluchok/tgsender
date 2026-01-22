@@ -111,12 +111,20 @@ func New() *cobra.Command {
 			mux.HandleFunc("/api/accounts/{id}/contacts", contactsHandler.HandleListContacts)
 			mux.HandleFunc("/api/accounts/{id}/import-chats", contactsHandler.HandleImportFromChats)
 			mux.HandleFunc("/api/accounts/{id}/import-chats/status", contactsHandler.HandleImportFromChatsStatus)
+			mux.HandleFunc("/api/accounts/{id}/import-contacts", contactsHandler.HandleImportContacts)
 			mux.HandleFunc("/api/contacts/{id}", contactsHandler.HandleDeleteContact)
 
 			// Messages routes
 			messageSender := messages.NewSender(contactStore, cfg.AppID, cfg.AppHash)
-			messagesHandler := messages.NewHandler(messageSender, accountStore, authHandler)
+			jobStore, err := messages.NewJobStore(".data")
+			if err != nil {
+				return err
+			}
+			messagesHandler := messages.NewHandler(messageSender, jobStore, accountStore, authHandler)
 			mux.HandleFunc("/api/accounts/{id}/send", messagesHandler.HandleSendMessages)
+			mux.HandleFunc("/api/accounts/{id}/send/status", messagesHandler.HandleSendStatus)
+			mux.HandleFunc("/api/accounts/{id}/send/retry", messagesHandler.HandleRetryFailed)
+			mux.HandleFunc("/api/accounts/{id}/send/history", messagesHandler.HandleSendHistory)
 
 			// Health check
 			mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {

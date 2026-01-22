@@ -137,12 +137,13 @@ func (s *Store) CreateOrUpdate(contact *Contact) error {
 }
 
 // BulkCreateOrUpdate adds multiple contacts efficiently
+// For existing contacts, it merges labels and preserves non-empty names
 func (s *Store) BulkCreateOrUpdate(contacts []*Contact) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for _, contact := range contacts {
-		// Check for existing contact by account ID and phone
+		// Check for existing contact by account ID and TelegramID
 		var found bool
 		for _, existing := range s.contacts {
 			if existing.AccountID == contact.AccountID && existing.TelegramID == contact.TelegramID {
@@ -150,6 +151,15 @@ func (s *Store) BulkCreateOrUpdate(contacts []*Contact) error {
 				contact.ID = existing.ID
 				contact.CreatedAt = existing.CreatedAt
 				contact.UpdatedAt = time.Now()
+				// Merge labels
+				contact.Labels = mergeLabels(existing.Labels, contact.Labels)
+				// Keep existing names if new ones are empty
+				if contact.FirstName == "" {
+					contact.FirstName = existing.FirstName
+				}
+				if contact.LastName == "" {
+					contact.LastName = existing.LastName
+				}
 				s.contacts[contact.ID] = contact
 				found = true
 				break
@@ -172,6 +182,23 @@ func (s *Store) BulkCreateOrUpdate(contacts []*Contact) error {
 	}
 
 	return s.save()
+}
+
+// mergeLabels combines two label slices, removing duplicates
+func mergeLabels(existing, new []string) []string {
+	labelSet := make(map[string]bool)
+	for _, l := range existing {
+		labelSet[l] = true
+	}
+	for _, l := range new {
+		labelSet[l] = true
+	}
+
+	merged := make([]string, 0, len(labelSet))
+	for l := range labelSet {
+		merged = append(merged, l)
+	}
+	return merged
 }
 
 // Delete removes a contact

@@ -12,6 +12,7 @@ interface ImportProgress {
   skipped: number;
   status: 'pending' | 'running' | 'completed' | 'failed';
   error?: string;
+  importType?: 'chats' | 'contacts';
 }
 
 function DashboardContent() {
@@ -182,10 +183,6 @@ function DashboardContent() {
   };
 
   const handleDeleteContact = async (contactId: string) => {
-    if (!confirm('Are you sure you want to delete this contact?')) {
-      return;
-    }
-
     try {
       const response = await fetch(`${API_URL}/api/contacts/${contactId}`, {
         method: 'DELETE',
@@ -202,7 +199,7 @@ function DashboardContent() {
 
   const handleImportFromChats = async () => {
     if (!selectedAccount) return;
-    
+
     // Clear any existing poll interval
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
@@ -228,11 +225,50 @@ function DashboardContent() {
         imported: data.imported,
         skipped: data.skipped,
         status: data.status,
+        importType: 'chats',
       });
 
       startPolling(selectedAccount.id, data.id);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to import contacts from chats');
+      setImportProgress(null);
+    }
+  };
+
+  const handleImportContacts = async () => {
+    if (!selectedAccount) return;
+
+    // Clear any existing poll interval
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+
+    try {
+      // Start the import job
+      const response = await fetch(`${API_URL}/api/accounts/${selectedAccount.id}/import-contacts`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to start import');
+      }
+
+      // Set initial progress and start polling
+      setImportProgress({
+        progress: data.progress,
+        imported: data.imported,
+        skipped: data.skipped,
+        status: data.status,
+        importType: 'contacts',
+      });
+
+      startPolling(selectedAccount.id, data.id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to import contacts');
       setImportProgress(null);
     }
   };
@@ -319,13 +355,30 @@ function DashboardContent() {
                       disabled={importProgress !== null && (importProgress.status === 'pending' || importProgress.status === 'running')}
                       title="Import from chats"
                     >
-                      {importProgress && (importProgress.status === 'pending' || importProgress.status === 'running') ? (
+                      {importProgress && importProgress.importType === 'chats' && (importProgress.status === 'pending' || importProgress.status === 'running') ? (
                         <div className="loading-spinner small" />
                       ) : (
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                           <polyline points="7 10 12 15 17 10"></polyline>
                           <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                      )}
+                    </button>
+                    <button
+                      className="add-contact-btn"
+                      onClick={handleImportContacts}
+                      disabled={importProgress !== null && (importProgress.status === 'pending' || importProgress.status === 'running')}
+                      title="Import contacts"
+                    >
+                      {importProgress && importProgress.importType === 'contacts' && (importProgress.status === 'pending' || importProgress.status === 'running') ? (
+                        <div className="loading-spinner small" />
+                      ) : (
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                          <circle cx="9" cy="7" r="4"></circle>
+                          <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                          <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
                         </svg>
                       )}
                     </button>

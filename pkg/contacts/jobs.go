@@ -18,17 +18,26 @@ const (
 	JobStatusFailed    JobStatus = "failed"
 )
 
+// ImportType represents the type of import
+type ImportType string
+
+const (
+	ImportTypeChats    ImportType = "chats"
+	ImportTypeContacts ImportType = "contacts"
+)
+
 // ImportJob represents an async import job
 type ImportJob struct {
-	ID        string    `json:"id"`
-	AccountID string    `json:"account_id"`
-	Status    JobStatus `json:"status"`
-	Progress  int       `json:"progress"` // Number of dialogs processed
-	Imported  int       `json:"imported"` // Number of contacts imported
-	Skipped   int       `json:"skipped"`  // Number of contacts skipped
-	Error     string    `json:"error,omitempty"`
-	StartedAt time.Time `json:"started_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         string     `json:"id"`
+	AccountID  string     `json:"account_id"`
+	ImportType ImportType `json:"import_type"`
+	Status     JobStatus  `json:"status"`
+	Progress   int        `json:"progress"` // Number of dialogs processed
+	Imported   int        `json:"imported"` // Number of contacts imported
+	Skipped    int        `json:"skipped"`  // Number of contacts skipped
+	Error      string     `json:"error,omitempty"`
+	StartedAt  time.Time  `json:"started_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 // JobManager manages async import jobs
@@ -50,6 +59,15 @@ func NewJobManager(checker *Checker) *JobManager {
 
 // StartImport starts an import job for an account, or returns existing running job
 func (m *JobManager) StartImport(accountID, sessionPath string) (*ImportJob, bool) {
+	return m.startImportWithType(accountID, sessionPath, ImportTypeChats)
+}
+
+// StartImportContacts starts an import contacts job for an account
+func (m *JobManager) StartImportContacts(accountID, sessionPath string) (*ImportJob, bool) {
+	return m.startImportWithType(accountID, sessionPath, ImportTypeContacts)
+}
+
+func (m *JobManager) startImportWithType(accountID, sessionPath string, importType ImportType) (*ImportJob, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -65,11 +83,12 @@ func (m *JobManager) StartImport(accountID, sessionPath string) (*ImportJob, boo
 	// Create new job
 	jobID := generateJobID()
 	job := &ImportJob{
-		ID:        jobID,
-		AccountID: accountID,
-		Status:    JobStatusPending,
-		StartedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:         jobID,
+		AccountID:  accountID,
+		ImportType: importType,
+		Status:     JobStatusPending,
+		StartedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
 	}
 
 	m.jobs[jobID] = job
@@ -127,15 +146,29 @@ func (m *JobManager) runImport(job *ImportJob, sessionPath string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
 	defer cancel()
 
-	// Run the import with progress callback
-	result, err := m.checker.ImportFromChatsWithProgress(ctx, job.AccountID, sessionPath, func(progress, imported, skipped int) {
-		m.mu.Lock()
-		job.Progress = progress
-		job.Imported = imported
-		job.Skipped = skipped
-		job.UpdatedAt = time.Now()
-		m.mu.Unlock()
-	})
+	var result *ChatContactsResult
+	var err error
+
+	if job.ImportType == ImportTypeContacts {
+		// Import from Telegram contacts
+		result, err = m.checker.ImportFromContacts(ctx, job.AccountID, sessionPath, func(imported, skipped int) {
+			m.mu.Lock()
+			job.Imported = imported
+			job.Skipped = skipped
+			job.UpdatedAt = time.Now()
+			m.mu.Unlock()
+		})
+	} else {
+		// Import from chats (default)
+		result, err = m.checker.ImportFromChatsWithProgress(ctx, job.AccountID, sessionPath, func(progress, imported, skipped int) {
+			m.mu.Lock()
+			job.Progress = progress
+			job.Imported = imported
+			job.Skipped = skipped
+			job.UpdatedAt = time.Now()
+			m.mu.Unlock()
+		})
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
