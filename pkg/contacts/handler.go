@@ -120,10 +120,10 @@ func (h *Handler) HandleCheckNumbers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get session path for this account
-	sessionPath := fmt.Sprintf(".session/account_%s.json", account.SessionToken)
+	sessionPath := fmt.Sprintf(".data/account_%s.json", account.SessionToken)
 	if account.SessionToken == "" {
 		// Fallback for accounts created before session token tracking
-		sessionPath = fmt.Sprintf(".session/account_%s.json", accountID)
+		sessionPath = fmt.Sprintf(".data/account_%s.json", accountID)
 	}
 
 	// Check contacts
@@ -337,9 +337,9 @@ func (h *Handler) HandleImportFromChats(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Get session path for this account
-	sessionPath := fmt.Sprintf(".session/account_%s.json", account.SessionToken)
+	sessionPath := fmt.Sprintf(".data/account_%s.json", account.SessionToken)
 	if account.SessionToken == "" {
-		sessionPath = fmt.Sprintf(".session/account_%s.json", accountID)
+		sessionPath = fmt.Sprintf(".data/account_%s.json", accountID)
 	}
 
 	// Start async import job
@@ -389,9 +389,9 @@ func (h *Handler) HandleImportContacts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get session path for this account
-	sessionPath := fmt.Sprintf(".session/account_%s.json", account.SessionToken)
+	sessionPath := fmt.Sprintf(".data/account_%s.json", account.SessionToken)
 	if account.SessionToken == "" {
-		sessionPath = fmt.Sprintf(".session/account_%s.json", accountID)
+		sessionPath = fmt.Sprintf(".data/account_%s.json", accountID)
 	}
 
 	// Start async import job
@@ -596,9 +596,9 @@ func (h *Handler) HandleImportFromFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get session path for this account
-	sessionPath := fmt.Sprintf(".session/account_%s.json", account.SessionToken)
+	sessionPath := fmt.Sprintf(".data/account_%s.json", account.SessionToken)
 	if account.SessionToken == "" {
-		sessionPath = fmt.Sprintf(".session/account_%s.json", accountID)
+		sessionPath = fmt.Sprintf(".data/account_%s.json", accountID)
 	}
 
 	// Import contacts

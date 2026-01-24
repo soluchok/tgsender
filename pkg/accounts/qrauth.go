@@ -163,8 +163,8 @@ func (m *QRAuthManager) runQRAuth(ctx context.Context, session *qrSession) {
 		}()
 	}()
 
-	// Ensure .session directory exists
-	if err := os.MkdirAll(".session", 0700); err != nil {
+	// Ensure .data directory exists
+	if err := os.MkdirAll(".data", 0700); err != nil {
 		slog.Error("failed to create session directory", "error", err)
 		m.mu.Lock()
 		session.state.Status = "error"
@@ -175,7 +175,7 @@ func (m *QRAuthManager) runQRAuth(ctx context.Context, session *qrSession) {
 
 	// Create session storage for this auth attempt
 	sessionStorage := &telegram.FileSessionStorage{
-		Path: fmt.Sprintf(".session/account_%s.json", session.state.Token),
+		Path: fmt.Sprintf(".data/account_%s.json", session.state.Token),
 	}
 
 	// Create update dispatcher for handling login token updates

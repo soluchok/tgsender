@@ -43,7 +43,7 @@ func (v *Validator) ValidateSession(ctx context.Context, account *Account) (*Val
 		return result, nil
 	}
 
-	sessionPath := ".session/account_" + account.SessionToken + ".json"
+	sessionPath := ".data/account_" + account.SessionToken + ".json"
 
 	// Check if session file exists
 	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {

@@ -100,7 +100,7 @@ func (h *Handler) HandleSendMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get session path
-	sessionPath := ".session/account_" + account.SessionToken + ".json"
+	sessionPath := ".data/account_" + account.SessionToken + ".json"
 	if account.SessionToken == "" {
 		writeJSONError(w, "Account session not found - please re-authenticate", http.StatusBadRequest)
 		return

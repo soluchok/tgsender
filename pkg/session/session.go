@@ -8,7 +8,7 @@ import (
 	"github.com/gotd/td/telegram"
 )
 
-const sessionDir = ".session"
+const sessionDir = ".data"
 
 func Get(phoneNumber string) (telegram.SessionStorage, error) {
 	if err := os.MkdirAll(sessionDir, 0700); err != nil {
