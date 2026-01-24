@@ -10,8 +10,8 @@ interface ImportContactsModalProps {
 }
 
 interface ImportContact {
-  telegram_id: number;
-  access_hash?: number;
+  telegram_id: string;  // Keep as string to preserve precision for large int64
+  access_hash?: string;  // Keep as string to preserve precision for large int64
   account_id?: string;
   phone: string;
   first_name: string;
@@ -30,7 +30,7 @@ interface ImportResult {
 
 export function ImportContactsModal({ account, onClose, onImported }: ImportContactsModalProps) {
   const [parsedContacts, setParsedContacts] = useState<ImportContact[]>([]);
-  const [selectedContactIds, setSelectedContactIds] = useState<Set<number>>(new Set());
+  const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -63,7 +63,19 @@ export function ImportContactsModal({ account, onClose, onImported }: ImportCont
 
     try {
       const text = await file.text();
-      const data = JSON.parse(text);
+      
+      // Replace large integers with strings to preserve precision
+      // This handles access_hash and telegram_id which can exceed JS safe integer limit
+      // Note: newer exports already have these as strings, but we handle both formats
+      let safeText = text.replace(
+        /("access_hash":\s*)(-?\d+)/g,
+        '$1"$2"'
+      );
+      safeText = safeText.replace(
+        /("telegram_id":\s*)(-?\d+)/g,
+        '$1"$2"'
+      );
+      const data = JSON.parse(safeText);
 
       // Validate the data structure
       if (!Array.isArray(data)) {
@@ -76,15 +88,22 @@ export function ImportContactsModal({ account, onClose, onImported }: ImportCont
       for (let i = 0; i < data.length; i++) {
         const item = data[i];
 
-        // Must have telegram_id
-        if (!item.telegram_id || typeof item.telegram_id !== 'number') {
-          setParseError(`Invalid contact at index ${i}: missing or invalid telegram_id`);
+        // telegram_id - keep as string
+        const telegramId = String(item.telegram_id || '');
+        
+        if (!telegramId) {
+          setParseError(`Invalid contact at index ${i}: missing telegram_id`);
           return;
         }
 
+        // access_hash must be kept as string to preserve precision
+        const accessHash = item.access_hash !== undefined && item.access_hash !== null
+          ? String(item.access_hash)
+          : undefined;
+
         contacts.push({
-          telegram_id: item.telegram_id,
-          access_hash: item.access_hash || 0,
+          telegram_id: telegramId,
+          access_hash: accessHash,
           account_id: item.account_id || '',
           phone: item.phone || '',
           first_name: item.first_name || '',
@@ -112,7 +131,7 @@ export function ImportContactsModal({ account, onClose, onImported }: ImportCont
     }
   };
 
-  const handleToggleContact = (telegramId: number) => {
+  const handleToggleContact = (telegramId: string) => {
     setSelectedContactIds(prev => {
       const next = new Set(prev);
       if (next.has(telegramId)) {

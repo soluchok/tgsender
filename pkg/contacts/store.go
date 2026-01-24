@@ -14,9 +14,9 @@ import (
 // Contact represents a verified Telegram contact
 type Contact struct {
 	ID         string    `json:"id"`
-	AccountID  string    `json:"account_id"`  // The account that verified this contact
-	TelegramID int64     `json:"telegram_id"` // Telegram user ID of the contact
-	AccessHash int64     `json:"access_hash"` // Required for sending messages
+	AccountID  string    `json:"account_id"`         // The account that verified this contact
+	TelegramID int64     `json:"telegram_id,string"` // Telegram user ID of the contact
+	AccessHash int64     `json:"access_hash,string"` // Required for sending messages
 	Phone      string    `json:"phone"`
 	FirstName  string    `json:"first_name"`
 	LastName   string    `json:"last_name,omitempty"`

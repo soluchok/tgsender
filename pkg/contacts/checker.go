@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -996,16 +997,35 @@ type FileImportResult struct {
 	Errors   []string `json:"errors"`   // Detailed errors for failed contacts
 }
 
+// FlexInt64 is an int64 that can unmarshal from either a JSON number or string
+type FlexInt64 int64
+
+func (f *FlexInt64) UnmarshalJSON(data []byte) error {
+	// Remove quotes if present (string representation)
+	s := strings.Trim(string(data), "\"")
+	if s == "" || s == "null" {
+		*f = 0
+		return nil
+	}
+	val, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return err
+	}
+	*f = FlexInt64(val)
+	return nil
+}
+
 // FileImportContact represents a contact to be imported from a file
 type FileImportContact struct {
-	TelegramID int64    `json:"telegram_id"`
-	AccessHash int64    `json:"access_hash,omitempty"` // If from same account, can reuse access_hash
-	AccountID  string   `json:"account_id,omitempty"`  // Original account ID this contact was exported from
-	Phone      string   `json:"phone"`
-	FirstName  string   `json:"first_name"`
-	LastName   string   `json:"last_name,omitempty"`
-	Username   string   `json:"username,omitempty"`
-	Labels     []string `json:"labels,omitempty"`
+	TelegramID int64     `json:"telegram_id,string"`
+	AccessHash FlexInt64 `json:"access_hash,omitempty"` // If from same account, can reuse access_hash
+	AccountID  string    `json:"account_id,omitempty"`  // Original account ID this contact was exported from
+	Phone      string    `json:"phone"`
+	FirstName  string    `json:"first_name"`
+	LastName   string    `json:"last_name,omitempty"`
+	Username   string    `json:"username,omitempty"`
+	PhotoURL   string    `json:"photo_url,omitempty"` // Base64 encoded profile photo
+	Labels     []string  `json:"labels,omitempty"`
 }
 
 // ImportFromFile imports contacts from a previously exported file
@@ -1086,11 +1106,12 @@ func (c *Checker) ImportFromFile(ctx context.Context, accountID string, sessionP
 					ID:         contactID,
 					AccountID:  accountID,
 					TelegramID: ic.TelegramID,
-					AccessHash: ic.AccessHash,
+					AccessHash: int64(ic.AccessHash),
 					Phone:      ic.Phone,
 					FirstName:  ic.FirstName,
 					LastName:   ic.LastName,
 					Username:   ic.Username,
+					PhotoURL:   ic.PhotoURL,
 					Labels:     ic.Labels,
 					IsValid:    true,
 					CreatedAt:  time.Now(),

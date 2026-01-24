@@ -47,8 +47,8 @@ export interface QRAuthState {
 export interface Contact {
   id: string;
   account_id: string;
-  telegram_id: number;
-  access_hash: number;
+  telegram_id: string;  // Serialized as string to preserve int64 precision
+  access_hash: string;  // Serialized as string to preserve int64 precision
   phone: string;
   first_name: string;
   last_name?: string;
