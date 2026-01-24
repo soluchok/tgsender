@@ -11,6 +11,8 @@ interface ImportContactsModalProps {
 
 interface ImportContact {
   telegram_id: number;
+  access_hash?: number;
+  account_id?: string;
   phone: string;
   first_name: string;
   last_name?: string;
@@ -41,7 +43,7 @@ export function ImportContactsModal({ account, onClose, onImported }: ImportCont
     if (!searchQuery.trim()) {
       return parsedContacts;
     }
-    
+
     const query = searchQuery.toLowerCase().trim().replace(/^@/, '');
     return parsedContacts.filter(contact => {
       const fullName = [contact.first_name, contact.last_name].filter(Boolean).join(' ').toLowerCase() || 'unknown';
@@ -73,21 +75,17 @@ export function ImportContactsModal({ account, onClose, onImported }: ImportCont
       const contacts: ImportContact[] = [];
       for (let i = 0; i < data.length; i++) {
         const item = data[i];
-        
+
         // Must have telegram_id
         if (!item.telegram_id || typeof item.telegram_id !== 'number') {
           setParseError(`Invalid contact at index ${i}: missing or invalid telegram_id`);
           return;
         }
 
-        // Must have phone or username for resolution
-        if (!item.phone && !item.username) {
-          setParseError(`Contact at index ${i} (${item.first_name || 'Unknown'}) has no phone or username - cannot resolve`);
-          return;
-        }
-
         contacts.push({
           telegram_id: item.telegram_id,
+          access_hash: item.access_hash || 0,
+          account_id: item.account_id || '',
           phone: item.phone || '',
           first_name: item.first_name || '',
           last_name: item.last_name || '',
@@ -129,7 +127,7 @@ export function ImportContactsModal({ account, onClose, onImported }: ImportCont
   const handleSelectAll = () => {
     const filteredIds = new Set(filteredContacts.map(c => c.telegram_id));
     const allFilteredSelected = filteredContacts.every(c => selectedContactIds.has(c.telegram_id));
-    
+
     if (allFilteredSelected) {
       setSelectedContactIds(prev => {
         const next = new Set(prev);
@@ -147,7 +145,7 @@ export function ImportContactsModal({ account, onClose, onImported }: ImportCont
 
   const handleImport = async () => {
     const contactsToImport = parsedContacts.filter(c => selectedContactIds.has(c.telegram_id));
-    
+
     if (contactsToImport.length === 0) {
       setError('Please select at least one contact');
       return;
@@ -173,7 +171,7 @@ export function ImportContactsModal({ account, onClose, onImported }: ImportCont
       }
 
       setImportResult(data);
-      
+
       // If there were any successful imports, notify parent
       if (data.imported > 0 || data.skipped > 0) {
         onImported();
@@ -194,7 +192,7 @@ export function ImportContactsModal({ account, onClose, onImported }: ImportCont
     setError(null);
   };
 
-  const allFilteredSelected = filteredContacts.length > 0 && 
+  const allFilteredSelected = filteredContacts.length > 0 &&
     filteredContacts.every(c => selectedContactIds.has(c.telegram_id));
 
   return (
@@ -226,7 +224,7 @@ export function ImportContactsModal({ account, onClose, onImported }: ImportCont
                   <span className="stat-label">Failed</span>
                 </div>
               </div>
-              
+
               {importResult.errors.length > 0 && (
                 <div className="import-errors">
                   <h4>Errors:</h4>
@@ -257,7 +255,7 @@ export function ImportContactsModal({ account, onClose, onImported }: ImportCont
                 Select a JSON file exported from another account. Contacts will be resolved
                 to ensure they work with this account.
               </p>
-              
+
               <div className="file-upload-area">
                 <input
                   ref={fileInputRef}

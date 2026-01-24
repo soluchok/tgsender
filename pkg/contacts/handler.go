@@ -119,12 +119,8 @@ func (h *Handler) HandleCheckNumbers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Get session path for this account
-	sessionPath := fmt.Sprintf(".data/account_%s.json", account.SessionToken)
-	if account.SessionToken == "" {
-		// Fallback for accounts created before session token tracking
-		sessionPath = fmt.Sprintf(".data/account_%s.json", accountID)
-	}
+	// Get session path for this account (uses account ID which is the TelegramID)
+	sessionPath := fmt.Sprintf(".data/account_%s.json", accountID)
 
 	// Check contacts
 	input := &CheckInput{
@@ -336,11 +332,8 @@ func (h *Handler) HandleImportFromChats(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Get session path for this account
-	sessionPath := fmt.Sprintf(".data/account_%s.json", account.SessionToken)
-	if account.SessionToken == "" {
-		sessionPath = fmt.Sprintf(".data/account_%s.json", accountID)
-	}
+	// Get session path for this account (uses account ID which is the TelegramID)
+	sessionPath := fmt.Sprintf(".data/account_%s.json", accountID)
 
 	// Start async import job
 	job, isNew := h.jobManager.StartImport(accountID, sessionPath)
@@ -388,11 +381,8 @@ func (h *Handler) HandleImportContacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get session path for this account
-	sessionPath := fmt.Sprintf(".data/account_%s.json", account.SessionToken)
-	if account.SessionToken == "" {
-		sessionPath = fmt.Sprintf(".data/account_%s.json", accountID)
-	}
+	// Get session path for this account (uses account ID which is the TelegramID)
+	sessionPath := fmt.Sprintf(".data/account_%s.json", accountID)
 
 	// Start async import job
 	job, isNew := h.jobManager.StartImportContacts(accountID, sessionPath)
@@ -595,11 +585,8 @@ func (h *Handler) HandleImportFromFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get session path for this account
-	sessionPath := fmt.Sprintf(".data/account_%s.json", account.SessionToken)
-	if account.SessionToken == "" {
-		sessionPath = fmt.Sprintf(".data/account_%s.json", accountID)
-	}
+	// Get session path for this account (uses account ID which is the TelegramID)
+	sessionPath := fmt.Sprintf(".data/account_%s.json", accountID)
 
 	// Import contacts
 	result, err := h.checker.ImportFromFile(r.Context(), accountID, sessionPath, req.Contacts)

@@ -99,12 +99,8 @@ func (h *Handler) HandleSendMessages(w http.ResponseWriter, r *http.Request) {
 		req.DelayMinMS = req.DelayMaxMS
 	}
 
-	// Get session path
-	sessionPath := ".data/account_" + account.SessionToken + ".json"
-	if account.SessionToken == "" {
-		writeJSONError(w, "Account session not found - please re-authenticate", http.StatusBadRequest)
-		return
-	}
+	// Get session path (uses account ID which is the TelegramID)
+	sessionPath := ".data/account_" + accountID + ".json"
 
 	// Get OpenAI token if AI prompt is provided
 	var openAIToken string

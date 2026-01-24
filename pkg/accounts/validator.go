@@ -39,11 +39,8 @@ type ValidationResult struct {
 func (v *Validator) ValidateSession(ctx context.Context, account *Account) (*ValidationResult, error) {
 	result := &ValidationResult{}
 
-	if account.SessionToken == "" {
-		return result, nil
-	}
-
-	sessionPath := ".data/account_" + account.SessionToken + ".json"
+	// Use account ID (which is the TelegramID) for session path
+	sessionPath := ".data/account_" + account.ID + ".json"
 
 	// Check if session file exists
 	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {

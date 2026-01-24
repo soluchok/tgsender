@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/downloader"
@@ -998,6 +999,8 @@ type FileImportResult struct {
 // FileImportContact represents a contact to be imported from a file
 type FileImportContact struct {
 	TelegramID int64    `json:"telegram_id"`
+	AccessHash int64    `json:"access_hash,omitempty"` // If from same account, can reuse access_hash
+	AccountID  string   `json:"account_id,omitempty"`  // Original account ID this contact was exported from
 	Phone      string   `json:"phone"`
 	FirstName  string   `json:"first_name"`
 	LastName   string   `json:"last_name,omitempty"`
@@ -1067,6 +1070,34 @@ func (c *Checker) ImportFromFile(ctx context.Context, accountID string, sessionP
 				existing.Labels = mergeLabels(existing.Labels, ic.Labels)
 				contactsToSave = append(contactsToSave, existing)
 				result.Skipped++
+				continue
+			}
+
+			// If contact was exported from the same account and has valid access_hash, reuse it
+			// This works because access_hash is account-specific in Telegram
+			if ic.AccountID == accountID && ic.AccessHash != 0 && ic.TelegramID != 0 {
+				contactID, err := generateID()
+				if err != nil {
+					result.Failed++
+					result.Errors = append(result.Errors, fmt.Sprintf("Failed to generate ID for '%s %s': %v", ic.FirstName, ic.LastName, err))
+					continue
+				}
+				contact := &Contact{
+					ID:         contactID,
+					AccountID:  accountID,
+					TelegramID: ic.TelegramID,
+					AccessHash: ic.AccessHash,
+					Phone:      ic.Phone,
+					FirstName:  ic.FirstName,
+					LastName:   ic.LastName,
+					Username:   ic.Username,
+					Labels:     ic.Labels,
+					IsValid:    true,
+					CreatedAt:  time.Now(),
+					UpdatedAt:  time.Now(),
+				}
+				contactsToSave = append(contactsToSave, contact)
+				result.Imported++
 				continue
 			}
 

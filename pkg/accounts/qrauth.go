@@ -28,6 +28,37 @@ type QRAuthState struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+// memorySession is an in-memory session storage that can be saved to file later
+type memorySession struct {
+	mu   sync.Mutex
+	data []byte
+}
+
+func (m *memorySession) LoadSession(_ context.Context) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.data == nil {
+		return nil, nil
+	}
+	return append([]byte(nil), m.data...), nil
+}
+
+func (m *memorySession) StoreSession(_ context.Context, data []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.data = append([]byte(nil), data...)
+	return nil
+}
+
+func (m *memorySession) SaveToFile(path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.data == nil {
+		return fmt.Errorf("no session data to save")
+	}
+	return os.WriteFile(path, m.data, 0600)
+}
+
 // QRAuthManager manages QR code authentication sessions
 type QRAuthManager struct {
 	mu       sync.RWMutex
@@ -38,11 +69,12 @@ type QRAuthManager struct {
 }
 
 type qrSession struct {
-	state      *QRAuthState
-	ownerID    int64
-	cancel     context.CancelFunc
-	client     *telegram.Client
-	passwordCh chan string // Channel to receive 2FA password
+	state         *QRAuthState
+	ownerID       int64
+	cancel        context.CancelFunc
+	client        *telegram.Client
+	memorySession *memorySession // In-memory session storage
+	passwordCh    chan string    // Channel to receive 2FA password
 }
 
 // NewQRAuthManager creates a new QR auth manager
@@ -173,10 +205,8 @@ func (m *QRAuthManager) runQRAuth(ctx context.Context, session *qrSession) {
 		return
 	}
 
-	// Create session storage for this auth attempt
-	sessionStorage := &telegram.FileSessionStorage{
-		Path: fmt.Sprintf(".data/account_%s.json", session.state.Token),
-	}
+	// Use in-memory session storage during auth - will save to file only on success
+	session.memorySession = &memorySession{}
 
 	// Create update dispatcher for handling login token updates
 	dispatcher := tg.NewUpdateDispatcher()
@@ -194,7 +224,7 @@ func (m *QRAuthManager) runQRAuth(ctx context.Context, session *qrSession) {
 	})
 
 	client := telegram.NewClient(m.appID, m.appHash, telegram.Options{
-		SessionStorage: sessionStorage,
+		SessionStorage: session.memorySession,
 		UpdateHandler:  dispatcher,
 	})
 	session.client = client
@@ -279,6 +309,16 @@ func (m *QRAuthManager) runQRAuth(ctx context.Context, session *qrSession) {
 			}
 		}
 	})
+
+	// After client.Run() completes, save session to file if login was successful
+	if session.state.Status == "success" && session.state.Account != nil {
+		sessionPath := fmt.Sprintf(".data/account_%s.json", session.state.Account.ID)
+		if err := session.memorySession.SaveToFile(sessionPath); err != nil {
+			slog.Error("failed to save session file", "error", err)
+		} else {
+			slog.Info("session saved to file", "path", sessionPath)
+		}
+	}
 
 	if err != nil && session.state.Status != "success" {
 		slog.Error("QR auth error", "error", err)
@@ -394,17 +434,18 @@ func (m *QRAuthManager) handle2FA(ctx context.Context, client *telegram.Client, 
 		// Download profile photo
 		photoURL := downloadProfilePhoto(ctx, client, user)
 
-		// Create and save account with session token
+		// Create account with TelegramID as the account ID
+		// Note: Session file will be renamed after client.Run() completes
 		account := &Account{
-			OwnerID:      session.ownerID,
-			TelegramID:   user.ID,
-			Phone:        user.Phone,
-			FirstName:    user.FirstName,
-			LastName:     user.LastName,
-			Username:     user.Username,
-			SessionToken: session.state.Token, // Store the session token
-			PhotoURL:     photoURL,
-			IsActive:     true,
+			ID:         fmt.Sprintf("%d", user.ID),
+			OwnerID:    session.ownerID,
+			TelegramID: user.ID,
+			Phone:      user.Phone,
+			FirstName:  user.FirstName,
+			LastName:   user.LastName,
+			Username:   user.Username,
+			PhotoURL:   photoURL,
+			IsActive:   true,
 		}
 
 		if err := m.store.Create(account); err != nil {
@@ -446,17 +487,18 @@ func (m *QRAuthManager) handleLoginSuccess(ctx context.Context, client *telegram
 	// Download profile photo
 	photoURL := downloadProfilePhoto(ctx, client, user)
 
-	// Create account with session token for later API calls
+	// Create account with TelegramID as the account ID
+	// Note: Session file will be renamed after client.Run() completes
 	account := &Account{
-		OwnerID:      session.ownerID,
-		TelegramID:   user.ID,
-		Phone:        user.Phone,
-		FirstName:    user.FirstName,
-		LastName:     user.LastName,
-		Username:     user.Username,
-		SessionToken: session.state.Token, // Store the session token
-		PhotoURL:     photoURL,
-		IsActive:     true,
+		ID:         fmt.Sprintf("%d", user.ID),
+		OwnerID:    session.ownerID,
+		TelegramID: user.ID,
+		Phone:      user.Phone,
+		FirstName:  user.FirstName,
+		LastName:   user.LastName,
+		Username:   user.Username,
+		PhotoURL:   photoURL,
+		IsActive:   true,
 	}
 
 	// Save account

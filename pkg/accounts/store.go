@@ -14,18 +14,17 @@ import (
 
 // Account represents a Telegram account linked to a user
 type Account struct {
-	ID           string    `json:"id"`
-	OwnerID      int64     `json:"owner_id"`    // Telegram user ID of the owner (from OAuth)
-	TelegramID   int64     `json:"telegram_id"` // Telegram user ID of this account
-	Phone        string    `json:"phone"`
-	FirstName    string    `json:"first_name"`
-	LastName     string    `json:"last_name,omitempty"`
-	Username     string    `json:"username,omitempty"`
-	PhotoURL     string    `json:"photo_url,omitempty"`
-	SessionToken string    `json:"session_token,omitempty"` // Token used for session file path
-	IsActive     bool      `json:"is_active"`
-	CreatedAt    time.Time `json:"created_at"`
-	OpenAIToken  string    `json:"openai_token,omitempty"` // OpenAI API token for message rewriting
+	ID          string    `json:"id"`
+	OwnerID     int64     `json:"owner_id"`    // Telegram user ID of the owner (from OAuth)
+	TelegramID  int64     `json:"telegram_id"` // Telegram user ID of this account
+	Phone       string    `json:"phone"`
+	FirstName   string    `json:"first_name"`
+	LastName    string    `json:"last_name,omitempty"`
+	Username    string    `json:"username,omitempty"`
+	PhotoURL    string    `json:"photo_url,omitempty"`
+	IsActive    bool      `json:"is_active"`
+	CreatedAt   time.Time `json:"created_at"`
+	OpenAIToken string    `json:"openai_token,omitempty"` // OpenAI API token for message rewriting
 }
 
 // Store manages account storage
@@ -98,13 +97,9 @@ func (s *Store) Create(acc *Account) error {
 		}
 	}
 
-	// Generate ID if not set
+	// Use TelegramID as the account ID for consistency with exports/imports
 	if acc.ID == "" {
-		id, err := generateID()
-		if err != nil {
-			return err
-		}
-		acc.ID = id
+		acc.ID = fmt.Sprintf("%d", acc.TelegramID)
 	}
 
 	acc.CreatedAt = time.Now()
