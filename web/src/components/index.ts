@@ -5,3 +5,5 @@ export { Sidebar } from './Sidebar';
 export { AddAccountModal } from './AddAccountModal';
 export { CheckNumbersModal } from './CheckNumbersModal';
 export { SendMessagesModal } from './SendMessagesModal';
+export { EditContactModal } from './EditContactModal';
+export { AccountSettingsModal } from './AccountSettingsModal';

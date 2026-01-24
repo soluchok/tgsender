@@ -38,8 +38,10 @@ type SendJob struct {
 	Error       string            `json:"error,omitempty"`
 	StartedAt   time.Time         `json:"started_at"`
 	UpdatedAt   time.Time         `json:"updated_at"`
-	ContactIDs  []string          `json:"contact_ids"`  // Original contact IDs
-	SessionPath string            `json:"session_path"` // Session path for retries
+	ContactIDs  []string          `json:"contact_ids"`         // Original contact IDs
+	SessionPath string            `json:"session_path"`        // Session path for retries
+	AIPrompt    string            `json:"ai_prompt,omitempty"` // AI rewriting instructions
+	OpenAIToken string            `json:"-"`                   // OpenAI token (not persisted)
 }
 
 // GetFailedContactIDs returns the contact IDs that failed to receive the message
@@ -291,7 +293,7 @@ func NewJobManager(store *JobStore, sender *Sender) *JobManager {
 }
 
 // StartSend starts a send job for an account
-func (m *JobManager) StartSend(accountID, sessionPath, message string, contactIDs []string, delayMinMS, delayMaxMS int) (*SendJob, error) {
+func (m *JobManager) StartSend(accountID, sessionPath, message string, contactIDs []string, delayMinMS, delayMaxMS int, aiPrompt, openAIToken string) (*SendJob, error) {
 	job := &SendJob{
 		ID:          generateJobID(),
 		AccountID:   accountID,
@@ -305,6 +307,8 @@ func (m *JobManager) StartSend(accountID, sessionPath, message string, contactID
 		UpdatedAt:   time.Now(),
 		ContactIDs:  contactIDs,
 		SessionPath: sessionPath,
+		AIPrompt:    aiPrompt,
+		OpenAIToken: openAIToken,
 	}
 
 	if err := m.store.Create(job); err != nil {
@@ -315,7 +319,7 @@ func (m *JobManager) StartSend(accountID, sessionPath, message string, contactID
 	go m.store.Cleanup(50)
 
 	// Start the job in background
-	go m.runSend(job.ID)
+	go m.runSend(job.ID, openAIToken)
 
 	return job, nil
 }
@@ -333,7 +337,7 @@ func (m *JobManager) RetryFailed(jobID string) (*SendJob, error) {
 		return nil, fmt.Errorf("no failed contacts to retry")
 	}
 
-	// Create new job for retry
+	// Create new job for retry (without AI - retries use original message)
 	job := &SendJob{
 		ID:          generateJobID(),
 		AccountID:   oldJob.AccountID,
@@ -347,14 +351,15 @@ func (m *JobManager) RetryFailed(jobID string) (*SendJob, error) {
 		UpdatedAt:   time.Now(),
 		ContactIDs:  failedIDs,
 		SessionPath: oldJob.SessionPath,
+		AIPrompt:    "", // No AI for retries
 	}
 
 	if err := m.store.Create(job); err != nil {
 		return nil, fmt.Errorf("failed to create retry job: %w", err)
 	}
 
-	// Start the job in background
-	go m.runSend(job.ID)
+	// Start the job in background (no OpenAI token for retries)
+	go m.runSend(job.ID, "")
 
 	return job, nil
 }
@@ -369,7 +374,7 @@ func (m *JobManager) GetJobsByAccount(accountID string) []*SendJob {
 	return m.store.GetByAccount(accountID)
 }
 
-func (m *JobManager) runSend(jobID string) {
+func (m *JobManager) runSend(jobID string, openAIToken string) {
 	// Get the job
 	job, ok := m.store.Get(jobID)
 	if !ok {
@@ -388,7 +393,7 @@ func (m *JobManager) runSend(jobID string) {
 	defer cancel()
 
 	// Run the send with progress callback
-	result, err := m.sender.SendToContactsWithProgress(ctx, job.SessionPath, job.ContactIDs, job.Message, job.DelayMinMS, job.DelayMaxMS, func(sent, failed int, results []RecipientResult) {
+	result, err := m.sender.SendToContactsWithProgress(ctx, job.SessionPath, job.ContactIDs, job.Message, job.DelayMinMS, job.DelayMaxMS, job.AIPrompt, openAIToken, func(sent, failed int, results []RecipientResult) {
 		m.store.UpdateProgress(jobID, sent, failed, results)
 	})
 

@@ -101,6 +101,15 @@ func New() *cobra.Command {
 			mux.HandleFunc("/api/accounts", accountsHandler.HandleListAccounts)
 			mux.HandleFunc("/api/accounts/{id}", accountsHandler.HandleDeleteAccount)
 			mux.HandleFunc("/api/accounts/{id}/validate", accountsHandler.HandleValidateAccount)
+			mux.HandleFunc("/api/accounts/{id}/settings", func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					accountsHandler.HandleGetSettings(w, r)
+				} else if r.Method == http.MethodPut {
+					accountsHandler.HandleUpdateSettings(w, r)
+				} else {
+					http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				}
+			})
 			mux.HandleFunc("/api/accounts/qr/start", accountsHandler.HandleStartQRAuth)
 			mux.HandleFunc("/api/accounts/qr/status", accountsHandler.HandleQRAuthStatus)
 			mux.HandleFunc("/api/accounts/qr/cancel", accountsHandler.HandleCancelQRAuth)
@@ -113,6 +122,7 @@ func New() *cobra.Command {
 			mux.HandleFunc("/api/accounts/{id}/import-chats/status", contactsHandler.HandleImportFromChatsStatus)
 			mux.HandleFunc("/api/accounts/{id}/import-contacts", contactsHandler.HandleImportContacts)
 			mux.HandleFunc("/api/contacts/{id}", contactsHandler.HandleDeleteContact)
+			mux.HandleFunc("/api/contacts/{id}/update", contactsHandler.HandleUpdateContact)
 
 			// Messages routes
 			messageSender := messages.NewSender(contactStore, cfg.AppID, cfg.AppHash)
@@ -193,7 +203,7 @@ func spaHandler(staticDir string) http.Handler {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 

@@ -214,6 +214,24 @@ func (s *Store) Delete(id string) error {
 	return s.save()
 }
 
+// Update updates a contact's editable fields (first name, last name, labels)
+func (s *Store) Update(id string, firstName, lastName string, labels []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	contact, ok := s.contacts[id]
+	if !ok {
+		return fmt.Errorf("contact not found")
+	}
+
+	contact.FirstName = firstName
+	contact.LastName = lastName
+	contact.Labels = labels
+	contact.UpdatedAt = time.Now()
+
+	return s.save()
+}
+
 // DeleteByAccount removes all contacts for a specific account
 func (s *Store) DeleteByAccount(accountID string) error {
 	s.mu.Lock()

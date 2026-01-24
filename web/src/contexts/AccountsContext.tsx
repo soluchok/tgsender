@@ -11,6 +11,7 @@ interface AccountsContextType {
   qrAuth: QRAuthState;
   fetchAccounts: () => Promise<void>;
   selectAccount: (account: TelegramAccount | null) => void;
+  updateAccount: (account: TelegramAccount) => void;
   startQRAuth: () => Promise<void>;
   cancelQRAuth: () => void;
   submitPassword: (password: string) => Promise<void>;
@@ -77,6 +78,11 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
         console.error('Failed to validate account:', err);
       }
     }
+  }, []);
+
+  const updateAccount = useCallback((account: TelegramAccount) => {
+    setAccounts(prev => prev.map(a => a.id === account.id ? account : a));
+    setSelectedAccount(prev => prev?.id === account.id ? account : prev);
   }, []);
 
   const startQRAuth = useCallback(async () => {
@@ -292,6 +298,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
         qrAuth,
         fetchAccounts,
         selectAccount,
+        updateAccount,
         startQRAuth,
         cancelQRAuth,
         submitPassword,

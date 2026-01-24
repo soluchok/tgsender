@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { UserProfile, Sidebar, CheckNumbersModal, SendMessagesModal } from '../components';
+import { UserProfile, Sidebar, CheckNumbersModal, SendMessagesModal, EditContactModal, AccountSettingsModal } from '../components';
 import { useAuth, useAccounts, AccountsProvider } from '../contexts';
 import { Contact } from '../types';
 
@@ -17,12 +17,15 @@ interface ImportProgress {
 
 function DashboardContent() {
   const { user } = useAuth();
-  const { selectedAccount, accounts, selectAccount } = useAccounts();
+  const { selectedAccount, accounts, selectAccount, updateAccount } = useAccounts();
   const { accountId } = useParams<{ accountId?: string }>();
   const navigate = useNavigate();
   const [showCheckNumbers, setShowCheckNumbers] = useState(false);
   const [showSendMessages, setShowSendMessages] = useState(false);
+  const [showAccountSettings, setShowAccountSettings] = useState(false);
+  const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [contactSearch, setContactSearch] = useState('');
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const pollIntervalRef = useRef<number | null>(null);
@@ -197,6 +200,14 @@ function DashboardContent() {
     }
   };
 
+  const handleEditContact = (contact: Contact) => {
+    setEditingContact(contact);
+  };
+
+  const handleContactUpdated = (updatedContact: Contact) => {
+    setContacts(prev => prev.map(c => c.id === updatedContact.id ? updatedContact : c));
+  };
+
   const handleImportFromChats = async () => {
     if (!selectedAccount) return;
 
@@ -328,7 +339,12 @@ function DashboardContent() {
                 <div className="card">
                   <h3>Account Settings</h3>
                   <p>Manage this account's settings</p>
-                  <button className="card-button">Open</button>
+                  <button 
+                    className="card-button"
+                    onClick={() => setShowAccountSettings(true)}
+                  >
+                    Open
+                  </button>
                 </div>
               </div>
 
@@ -336,6 +352,26 @@ function DashboardContent() {
               <div className="contacts-section">
                 <div className="contacts-header">
                   <h3>Contacts</h3>
+                  {contacts.length > 0 && (
+                    <div className="contacts-search">
+                      <input
+                        type="text"
+                        className="contacts-search-input"
+                        placeholder="Search contacts..."
+                        value={contactSearch}
+                        onChange={(e) => setContactSearch(e.target.value)}
+                      />
+                      {contactSearch && (
+                        <button
+                          className="contacts-search-clear"
+                          onClick={() => setContactSearch('')}
+                          title="Clear search"
+                        >
+                          &times;
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <div className="contacts-header-actions">
                     <span className="contacts-count">{contacts.length} contacts</span>
                     {importProgress && (
@@ -406,15 +442,35 @@ function DashboardContent() {
                     <p className="hint">Click the + button to add contacts.</p>
                   </div>
                 ) : (
-                  <div className="contacts-grid">
-                    {contacts.map((contact) => (
-                      <ContactCard
-                        key={contact.id}
-                        contact={contact}
-                        onDelete={() => handleDeleteContact(contact.id)}
-                      />
-                    ))}
-                  </div>
+                  (() => {
+                    const searchLower = contactSearch.toLowerCase().trim();
+                    const filteredContacts = searchLower
+                      ? contacts.filter(c =>
+                          (c.first_name && c.first_name.toLowerCase().includes(searchLower)) ||
+                          (c.last_name && c.last_name.toLowerCase().includes(searchLower)) ||
+                          (c.username && c.username.toLowerCase().includes(searchLower)) ||
+                          (c.phone && c.phone.includes(searchLower)) ||
+                          (c.labels && c.labels.some(l => l.toLowerCase().includes(searchLower)))
+                        )
+                      : contacts;
+
+                    return filteredContacts.length === 0 ? (
+                      <div className="contacts-empty">
+                        <p>No contacts match your search.</p>
+                      </div>
+                    ) : (
+                      <div className="contacts-grid">
+                        {filteredContacts.map((contact) => (
+                          <ContactCard
+                            key={contact.id}
+                            contact={contact}
+                            onDelete={() => handleDeleteContact(contact.id)}
+                            onEdit={() => handleEditContact(contact)}
+                          />
+                        ))}
+                      </div>
+                    );
+                  })()
                 )}
               </div>
             </div>
@@ -449,6 +505,26 @@ function DashboardContent() {
           onClose={handleSendMessagesClose}
         />
       )}
+
+      {showAccountSettings && selectedAccount && (
+        <AccountSettingsModal
+          account={selectedAccount}
+          onClose={() => setShowAccountSettings(false)}
+          onSave={(hasOpenAIToken) => {
+            if (updateAccount) {
+              updateAccount({ ...selectedAccount, has_openai_token: hasOpenAIToken });
+            }
+          }}
+        />
+      )}
+
+      {editingContact && (
+        <EditContactModal
+          contact={editingContact}
+          onClose={() => setEditingContact(null)}
+          onSave={handleContactUpdated}
+        />
+      )}
     </div>
   );
 }
@@ -456,9 +532,10 @@ function DashboardContent() {
 interface ContactCardProps {
   contact: Contact;
   onDelete: () => void;
+  onEdit: () => void;
 }
 
-function ContactCard({ contact, onDelete }: ContactCardProps) {
+function ContactCard({ contact, onDelete, onEdit }: ContactCardProps) {
   const displayName = [contact.first_name, contact.last_name].filter(Boolean).join(' ') || 'Unknown';
   const initial = (contact.first_name || contact.phone || 'U').charAt(0).toUpperCase();
 
@@ -491,13 +568,25 @@ function ContactCard({ contact, onDelete }: ContactCardProps) {
         )}
         <span className="contact-card-phone">{contact.phone}</span>
       </div>
-      <button
-        className="contact-card-delete"
-        onClick={onDelete}
-        title="Delete contact"
-      >
-        &times;
-      </button>
+      <div className="contact-card-actions">
+        <button
+          className="contact-card-edit"
+          onClick={onEdit}
+          title="Edit contact"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+          </svg>
+        </button>
+        <button
+          className="contact-card-delete"
+          onClick={onDelete}
+          title="Delete contact"
+        >
+          &times;
+        </button>
+      </div>
     </div>
   );
 }

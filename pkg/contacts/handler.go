@@ -8,6 +8,9 @@ import (
 	"strings"
 	"unicode"
 
+	"golang.org/x/text/collate"
+	"golang.org/x/text/language"
+
 	"github.com/soluchok/tgsender/pkg/accounts"
 	"github.com/soluchok/tgsender/pkg/auth"
 )
@@ -190,12 +193,11 @@ func (h *Handler) HandleListContacts(w http.ResponseWriter, r *http.Request) {
 		contacts = []*Contact{}
 	}
 
+	collator := collate.New(language.English)
 	slices.SortFunc(contacts, func(a, b *Contact) int {
-		if a.UpdatedAt.Before(b.UpdatedAt) {
-			return -1
-		}
-
-		return 1
+		nameA := strings.TrimSpace(a.FirstName + " " + a.LastName)
+		nameB := strings.TrimSpace(b.FirstName + " " + b.LastName)
+		return collator.CompareString(nameA, nameB)
 	})
 
 	writeJSON(w, map[string]interface{}{
@@ -244,6 +246,62 @@ func (h *Handler) HandleDeleteContact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]string{"message": "Contact deleted"}, http.StatusOK)
+}
+
+// HandleUpdateContact handles PUT /api/contacts/{id}
+func (h *Handler) HandleUpdateContact(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ownerID, ok := h.getOwnerID(r)
+	if !ok {
+		writeJSONError(w, "Not authenticated", http.StatusUnauthorized)
+		return
+	}
+
+	// Get contact ID from path
+	contactID := r.PathValue("id")
+	if contactID == "" {
+		writeJSONError(w, "Contact ID required", http.StatusBadRequest)
+		return
+	}
+
+	// Get contact and verify ownership through account
+	contact, ok := h.store.Get(contactID)
+	if !ok {
+		writeJSONError(w, "Contact not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify the account belongs to this owner
+	account, ok := h.accountStore.Get(contact.AccountID)
+	if !ok || account.OwnerID != ownerID {
+		writeJSONError(w, "Unauthorized", http.StatusForbidden)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		FirstName string   `json:"first_name"`
+		LastName  string   `json:"last_name"`
+		Labels    []string `json:"labels"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Update contact
+	if err := h.store.Update(contactID, req.FirstName, req.LastName, req.Labels); err != nil {
+		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return updated contact
+	updatedContact, _ := h.store.Get(contactID)
+	writeJSON(w, updatedContact, http.StatusOK)
 }
 
 // HandleImportFromChats handles POST /api/accounts/{id}/import-chats

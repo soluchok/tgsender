@@ -65,6 +65,7 @@ func (h *Handler) HandleSendMessages(w http.ResponseWriter, r *http.Request) {
 		Message    string   `json:"message"`
 		DelayMinMS int      `json:"delay_min_ms"` // Min delay between messages in milliseconds
 		DelayMaxMS int      `json:"delay_max_ms"` // Max delay between messages in milliseconds
+		AIPrompt   string   `json:"ai_prompt"`    // AI prompt for message rewriting
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSONError(w, "Invalid request body", http.StatusBadRequest)
@@ -105,8 +106,18 @@ func (h *Handler) HandleSendMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get OpenAI token if AI prompt is provided
+	var openAIToken string
+	if req.AIPrompt != "" {
+		openAIToken = account.OpenAIToken
+		if openAIToken == "" {
+			writeJSONError(w, "OpenAI token not configured for this account", http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Start async send job
-	job, err := h.jobManager.StartSend(accountID, sessionPath, req.Message, req.ContactIDs, req.DelayMinMS, req.DelayMaxMS)
+	job, err := h.jobManager.StartSend(accountID, sessionPath, req.Message, req.ContactIDs, req.DelayMinMS, req.DelayMaxMS, req.AIPrompt, openAIToken)
 	if err != nil {
 		writeJSONError(w, fmt.Sprintf("Failed to start send job: %v", err), http.StatusInternalServerError)
 		return

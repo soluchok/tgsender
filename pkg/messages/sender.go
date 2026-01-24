@@ -17,6 +17,7 @@ import (
 	"github.com/gotd/td/tgerr"
 
 	"github.com/soluchok/tgsender/pkg/contacts"
+	"github.com/soluchok/tgsender/pkg/openai"
 )
 
 // SendResult represents the result of sending messages
@@ -194,7 +195,7 @@ func (s *Sender) SendToContacts(ctx context.Context, sessionPath string, contact
 }
 
 // SendToContactsWithProgress sends a message to the specified contacts with progress callback
-func (s *Sender) SendToContactsWithProgress(ctx context.Context, sessionPath string, contactIDs []string, messageText string, delayMinMS, delayMaxMS int, onProgress func(sent, failed int, results []RecipientResult)) (*SendResult, error) {
+func (s *Sender) SendToContactsWithProgress(ctx context.Context, sessionPath string, contactIDs []string, messageText string, delayMinMS, delayMaxMS int, aiPrompt, openAIToken string, onProgress func(sent, failed int, results []RecipientResult)) (*SendResult, error) {
 	result := &SendResult{
 		Results: make([]RecipientResult, 0),
 	}
@@ -226,6 +227,13 @@ func (s *Sender) SendToContactsWithProgress(ctx context.Context, sessionPath str
 	}
 
 	result.Total = len(contactsToSend)
+
+	// Create OpenAI client if AI rewriting is enabled
+	var openAIClient *openai.Client
+	if aiPrompt != "" && openAIToken != "" {
+		openAIClient = openai.NewClient(openAIToken)
+		slog.Info("AI message rewriting enabled")
+	}
 
 	// Create session storage
 	sessionStorage := &telegram.FileSessionStorage{
@@ -262,7 +270,7 @@ func (s *Sender) SendToContactsWithProgress(ctx context.Context, sessionPath str
 
 			sent[contact.TelegramID] = true
 
-			// Process message template for this contact
+			// Process message template for this contact first
 			processedMessage, err := processMessageTemplate(messageText, contact)
 			if err != nil {
 				recipientResult.Success = false
@@ -278,6 +286,23 @@ func (s *Sender) SendToContactsWithProgress(ctx context.Context, sessionPath str
 					onProgress(result.Successful, result.Failed, result.Results)
 				}
 				continue
+			}
+
+			// Use AI to rewrite the personalized message if enabled
+			if openAIClient != nil {
+				rewrittenMessage, err := openAIClient.RewriteMessage(ctx, processedMessage, aiPrompt)
+				if err != nil {
+					slog.Warn("AI rewrite failed, using original message",
+						slog.String("phone", contact.Phone),
+						slog.String("error", err.Error()),
+					)
+					// Continue with processed message if AI fails
+				} else {
+					processedMessage = rewrittenMessage
+					slog.Debug("message rewritten by AI",
+						slog.String("phone", contact.Phone),
+					)
+				}
 			}
 
 			// Create peer

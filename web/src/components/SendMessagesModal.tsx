@@ -45,7 +45,28 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
   const [delayMin, setDelayMin] = useState(0);
   const [delayMax, setDelayMax] = useState(60);
   const [searchQuery, setSearchQuery] = useState('');
+  const [hasOpenAIToken, setHasOpenAIToken] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [useAI, setUseAI] = useState(false);
   const pollIntervalRef = useRef<number | null>(null);
+
+  // Check if account has OpenAI token
+  useEffect(() => {
+    const checkSettings = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/accounts/${account.id}/settings`, {
+          credentials: 'include',
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setHasOpenAIToken(data.has_openai_token || false);
+        }
+      } catch (err) {
+        console.error('Failed to check account settings:', err);
+      }
+    };
+    checkSettings();
+  }, [account.id]);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -220,22 +241,33 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
       return;
     }
 
+    if (useAI && !aiPrompt.trim()) {
+      setError('Please enter AI instructions or disable AI rewriting');
+      return;
+    }
+
     setIsSending(true);
     setViewMode('progress');
 
     try {
+      const requestBody: Record<string, unknown> = {
+        contact_ids: Array.from(selectedIds),
+        message: message.trim(),
+        delay_min_ms: delayMin * 1000,
+        delay_max_ms: delayMax * 1000,
+      };
+
+      if (useAI && aiPrompt.trim()) {
+        requestBody.ai_prompt = aiPrompt.trim();
+      }
+
       const response = await fetch(`${API_URL}/api/accounts/${account.id}/send`, {
         method: 'POST',
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          contact_ids: Array.from(selectedIds),
-          message: message.trim(),
-          delay_min_ms: delayMin * 1000,
-          delay_max_ms: delayMax * 1000,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const data = await response.json();
@@ -352,6 +384,9 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
               isSending={isSending}
               error={error}
               allSelected={allSelected}
+              hasOpenAIToken={hasOpenAIToken}
+              useAI={useAI}
+              aiPrompt={aiPrompt}
               formatDelay={formatDelay}
               onMessageChange={setMessage}
               onDelayMinChange={handleDelayMinChange}
@@ -361,6 +396,8 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
               onClearLabelFilter={handleClearLabelFilter}
               onSelectAll={handleSelectAll}
               onToggleContact={handleToggleContact}
+              onUseAIChange={setUseAI}
+              onAiPromptChange={setAiPrompt}
             />
           )}
 
@@ -430,6 +467,9 @@ interface ComposeViewProps {
   isSending: boolean;
   error: string | null;
   allSelected: boolean;
+  hasOpenAIToken: boolean;
+  useAI: boolean;
+  aiPrompt: string;
   formatDelay: (min: number, max: number) => string;
   onMessageChange: (msg: string) => void;
   onDelayMinChange: (val: number) => void;
@@ -439,6 +479,8 @@ interface ComposeViewProps {
   onClearLabelFilter: () => void;
   onSelectAll: () => void;
   onToggleContact: (id: string) => void;
+  onUseAIChange: (use: boolean) => void;
+  onAiPromptChange: (prompt: string) => void;
 }
 
 function ComposeView({
@@ -454,6 +496,9 @@ function ComposeView({
   isSending,
   error,
   allSelected,
+  hasOpenAIToken,
+  useAI,
+  aiPrompt,
   formatDelay,
   onMessageChange,
   onDelayMinChange,
@@ -463,6 +508,8 @@ function ComposeView({
   onClearLabelFilter,
   onSelectAll,
   onToggleContact,
+  onUseAIChange,
+  onAiPromptChange,
 }: ComposeViewProps) {
   if (contacts.length === 0) {
     return (
@@ -491,6 +538,35 @@ function ComposeView({
           <strong>Random pick:</strong> <code>{'{{pick "Hey" "Hi" "Hello"}}'}</code> - randomly selects one option per message
         </div>
       </div>
+
+      {hasOpenAIToken && (
+        <div className="form-group ai-rewrite-section">
+          <label className="ai-toggle-label">
+            <input
+              type="checkbox"
+              checked={useAI}
+              onChange={(e) => onUseAIChange(e.target.checked)}
+              disabled={isSending}
+            />
+            <span>Use AI to rewrite message for each contact</span>
+          </label>
+          {useAI && (
+            <div className="ai-prompt-wrapper">
+              <textarea
+                value={aiPrompt}
+                onChange={(e) => onAiPromptChange(e.target.value)}
+                placeholder="Enter instructions for AI, e.g.: 'Rewrite this message in a friendly, casual tone. Make it feel personal and unique for each recipient.'"
+                rows={3}
+                disabled={isSending}
+                className="ai-prompt-input"
+              />
+              <div className="ai-prompt-hint">
+                The AI will rewrite each personalized message based on these instructions before sending.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="form-group">
         <label>Delay between messages: <strong>{formatDelay(delayMin, delayMax)}</strong></label>
@@ -847,7 +923,18 @@ function ContactSelectItem({ contact, selected, onToggle, disabled }: ContactSel
         )}
       </div>
       <div className="contact-info">
-        <span className="contact-name">{displayName}</span>
+        <div className="contact-name-row">
+          <span className="contact-name">{displayName}</span>
+          {contact.labels && contact.labels.length > 0 && (
+            <div className="contact-labels">
+              {contact.labels.map((label, index) => (
+                <span key={index} className="contact-label-small">
+                  {label}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
         {contact.username && <span className="contact-username">@{contact.username}</span>}
         <span className="contact-phone">{contact.phone}</span>
       </div>

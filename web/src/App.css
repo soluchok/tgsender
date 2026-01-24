@@ -1209,6 +1209,59 @@ body {
   margin: 0;
 }
 
+/* Contacts Search */
+.contacts-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.contacts-search-input {
+  width: 180px;
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  background: var(--background-color);
+  transition: border-color 0.2s, box-shadow 0.2s, width 0.2s;
+}
+
+.contacts-search-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px rgba(0, 136, 204, 0.1);
+  background: var(--card-background);
+  width: 220px;
+}
+
+.contacts-search-input::placeholder {
+  color: var(--text-secondary);
+}
+
+.contacts-search-clear {
+  position: absolute;
+  right: 0.25rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s, background-color 0.2s;
+}
+
+.contacts-search-clear:hover {
+  color: var(--error-color);
+  background: rgba(220, 53, 69, 0.1);
+}
+
 .contacts-count {
   font-size: 0.85rem;
   color: var(--text-secondary);
@@ -1371,34 +1424,6 @@ body {
   font-size: 0.75rem;
   color: var(--text-secondary);
   font-family: monospace;
-}
-
-.contact-card-delete {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 1.25rem;
-  cursor: pointer;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.2s, background-color 0.2s, color 0.2s;
-}
-
-.contact-card:hover .contact-card-delete {
-  opacity: 1;
-}
-
-.contact-card-delete:hover {
-  background: var(--error-color);
-  color: white;
 }
 
 /* Send Messages Modal */
@@ -1737,6 +1762,38 @@ body {
   height: 36px;
   border-radius: 50%;
   object-fit: cover;
+}
+
+.contact-select-item .contact-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.contact-select-item .contact-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.contact-select-item .contact-labels {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.contact-label-small {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  background: var(--primary-color);
+  color: white;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .empty-state {
@@ -2120,4 +2177,278 @@ body {
 /* Result message in result view */
 .result-message {
   margin-bottom: 1rem;
+}
+
+/* Edit Contact Modal */
+.edit-contact-modal {
+  max-width: 400px;
+  width: 90%;
+}
+
+.edit-contact-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.edit-contact-avatar {
+  flex-shrink: 0;
+}
+
+.edit-contact-avatar .avatar-placeholder {
+  width: 56px;
+  height: 56px;
+  font-size: 1.25rem;
+}
+
+.edit-contact-avatar .avatar-image {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.edit-contact-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.edit-contact-username {
+  font-size: 0.9rem;
+  color: var(--primary-color);
+  font-weight: 500;
+}
+
+.edit-contact-phone {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  font-family: monospace;
+}
+
+/* Contact Card Actions */
+.contact-card-actions {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  gap: 0.25rem;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.contact-card:hover .contact-card-actions {
+  opacity: 1;
+}
+
+.contact-card-edit,
+.contact-card-delete {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.contact-card-edit {
+  font-size: 0.9rem;
+}
+
+.contact-card-delete {
+  font-size: 1.25rem;
+}
+
+.contact-card-edit:hover {
+  background: var(--primary-color);
+  color: white;
+}
+
+.contact-card-delete:hover {
+  background: var(--error-color);
+  color: white;
+}
+
+/* Account Settings Modal */
+.account-settings-modal {
+  max-width: 500px;
+  width: 95%;
+}
+
+.account-settings-modal .modal-actions {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--border-color);
+  background: var(--card-background);
+  flex-shrink: 0;
+}
+
+.settings-account-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: var(--background-color);
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+}
+
+.settings-account-name {
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.settings-account-username {
+  color: var(--primary-color);
+  font-size: 0.9rem;
+}
+
+.settings-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 2rem;
+  color: var(--text-secondary);
+}
+
+.form-hint {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0.25rem 0 0.75rem 0;
+  line-height: 1.4;
+}
+
+.token-input-wrapper {
+  position: relative;
+}
+
+.token-input {
+  width: 100%;
+  padding: 0.75rem 4.5rem 0.75rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-family: monospace;
+  background: var(--background-color);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.token-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(0, 136, 204, 0.1);
+  background: var(--card-background);
+}
+
+.token-input-actions {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.token-input-actions button.token-toggle-btn,
+.token-input-actions button.token-clear-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: color 0.2s, background-color 0.2s;
+  width: auto;
+  height: auto;
+  min-width: unset;
+  font-size: inherit;
+  font-weight: normal;
+}
+
+.token-input-actions button.token-toggle-btn:hover,
+.token-input-actions button.token-clear-btn:hover {
+  color: var(--text-color);
+  background: var(--border-color);
+}
+
+.token-input-actions button.token-clear-btn {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.token-input-actions button.token-clear-btn:hover {
+  color: var(--error-color);
+}
+
+/* AI Rewrite Section */
+.ai-rewrite-section {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(59, 130, 246, 0.05));
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.ai-rewrite-section .ai-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--text-color);
+  margin: 0;
+}
+
+.ai-rewrite-section .ai-toggle-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  cursor: pointer;
+  accent-color: #8b5cf6;
+  margin: 0;
+}
+
+.ai-prompt-wrapper {
+  margin-top: 0.75rem;
+}
+
+.ai-prompt-input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: var(--card-background);
+  resize: vertical;
+  min-height: 80px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.ai-prompt-input:focus {
+  outline: none;
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+}
+
+.ai-prompt-input::placeholder {
+  color: var(--text-secondary);
+}
+
+.ai-prompt-hint {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-top: 0.5rem;
+  line-height: 1.4;
 }

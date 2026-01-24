@@ -25,6 +25,7 @@ type Account struct {
 	SessionToken string    `json:"session_token,omitempty"` // Token used for session file path
 	IsActive     bool      `json:"is_active"`
 	CreatedAt    time.Time `json:"created_at"`
+	OpenAIToken  string    `json:"openai_token,omitempty"` // OpenAI API token for message rewriting
 }
 
 // Store manages account storage
