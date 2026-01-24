@@ -164,27 +164,25 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
   // Filter contacts based on selected labels and search query
   const filteredContacts = useMemo(() => {
     let filtered = contacts;
-    
+
     if (selectedLabels.size > 0) {
       filtered = filtered.filter(contact =>
         contact.labels?.some(label => selectedLabels.has(label))
       );
     }
-    
+
     if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
+      const query = searchQuery.toLowerCase().trim().replace(/^@/, '');
       filtered = filtered.filter(contact => {
-        const firstName = (contact.first_name || '').toLowerCase();
-        const lastName = (contact.last_name || '').toLowerCase();
+        const fullName = [contact.first_name, contact.last_name].filter(Boolean).join(' ').toLowerCase() || 'unknown';
         const username = (contact.username || '').toLowerCase();
         const phone = (contact.phone || '').toLowerCase();
-        return firstName.includes(query) || 
-               lastName.includes(query) || 
-               username.includes(query) || 
-               phone.includes(query);
+        return fullName.includes(query) ||
+          username.includes(query) ||
+          phone.includes(query);
       });
     }
-    
+
     return filtered;
   }, [contacts, selectedLabels, searchQuery]);
 
@@ -827,7 +825,7 @@ interface HistoryViewProps {
 }
 
 function HistoryView({ jobs, onViewJob, onBack }: HistoryViewProps) {
-  const sortedJobs = [...jobs].sort((a, b) => 
+  const sortedJobs = [...jobs].sort((a, b) =>
     new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
   );
 

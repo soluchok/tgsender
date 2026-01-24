@@ -443,15 +443,15 @@ function DashboardContent() {
                   </div>
                 ) : (
                   (() => {
-                    const searchLower = contactSearch.toLowerCase().trim();
+                    const searchLower = contactSearch.toLowerCase().trim().replace(/^@/, '');
                     const filteredContacts = searchLower
-                      ? contacts.filter(c =>
-                          (c.first_name && c.first_name.toLowerCase().includes(searchLower)) ||
-                          (c.last_name && c.last_name.toLowerCase().includes(searchLower)) ||
-                          (c.username && c.username.toLowerCase().includes(searchLower)) ||
-                          (c.phone && c.phone.includes(searchLower)) ||
-                          (c.labels && c.labels.some(l => l.toLowerCase().includes(searchLower)))
-                        )
+                      ? contacts.filter(c => {
+                          const fullName = [c.first_name, c.last_name].filter(Boolean).join(' ').toLowerCase() || 'unknown';
+                          return fullName.includes(searchLower) ||
+                            (c.username && c.username.toLowerCase().includes(searchLower)) ||
+                            (c.phone && c.phone.includes(searchLower)) ||
+                            (c.labels && c.labels.some(l => l.toLowerCase().includes(searchLower)));
+                        })
                       : contacts;
 
                     return filteredContacts.length === 0 ? (
