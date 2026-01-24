@@ -121,6 +121,8 @@ func New() *cobra.Command {
 			mux.HandleFunc("/api/accounts/{id}/import-chats", contactsHandler.HandleImportFromChats)
 			mux.HandleFunc("/api/accounts/{id}/import-chats/status", contactsHandler.HandleImportFromChatsStatus)
 			mux.HandleFunc("/api/accounts/{id}/import-contacts", contactsHandler.HandleImportContacts)
+			mux.HandleFunc("/api/accounts/{id}/import-file", contactsHandler.HandleImportFromFile)
+			mux.HandleFunc("/api/contacts/export", contactsHandler.HandleExportContacts)
 			mux.HandleFunc("/api/contacts/{id}", contactsHandler.HandleDeleteContact)
 			mux.HandleFunc("/api/contacts/{id}/update", contactsHandler.HandleUpdateContact)
 

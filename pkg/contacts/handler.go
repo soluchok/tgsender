@@ -484,6 +484,138 @@ func (h *Handler) HandleImportFromChatsStatus(w http.ResponseWriter, r *http.Req
 	}, http.StatusOK)
 }
 
+// HandleExportContacts handles POST /api/contacts/export
+func (h *Handler) HandleExportContacts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ownerID, ok := h.getOwnerID(r)
+	if !ok {
+		writeJSONError(w, "Not authenticated", http.StatusUnauthorized)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		AccountIDs []string `json:"account_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.AccountIDs) == 0 {
+		writeJSONError(w, "At least one account ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify all accounts exist and belong to this owner
+	for _, accountID := range req.AccountIDs {
+		account, ok := h.accountStore.Get(accountID)
+		if !ok {
+			writeJSONError(w, fmt.Sprintf("Account not found: %s", accountID), http.StatusNotFound)
+			return
+		}
+		if account.OwnerID != ownerID {
+			writeJSONError(w, "Unauthorized", http.StatusForbidden)
+			return
+		}
+	}
+
+	// Collect contacts from all selected accounts
+	var allContacts []*Contact
+	for _, accountID := range req.AccountIDs {
+		contacts := h.store.GetByAccount(accountID)
+		allContacts = append(allContacts, contacts...)
+	}
+
+	// Sort contacts by name
+	collator := collate.New(language.English)
+	slices.SortFunc(allContacts, func(a, b *Contact) int {
+		nameA := strings.TrimSpace(a.FirstName + " " + a.LastName)
+		nameB := strings.TrimSpace(b.FirstName + " " + b.LastName)
+		return collator.CompareString(nameA, nameB)
+	})
+
+	// Set headers for file download
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", "attachment; filename=contacts.json")
+
+	// Write JSON
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	encoder.Encode(allContacts)
+}
+
+// HandleImportFromFile handles POST /api/accounts/{id}/import-file
+func (h *Handler) HandleImportFromFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ownerID, ok := h.getOwnerID(r)
+	if !ok {
+		writeJSONError(w, "Not authenticated", http.StatusUnauthorized)
+		return
+	}
+
+	// Get account ID from path
+	accountID := r.PathValue("id")
+	if accountID == "" {
+		writeJSONError(w, "Account ID required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify account exists and belongs to this owner
+	account, ok := h.accountStore.Get(accountID)
+	if !ok {
+		writeJSONError(w, "Account not found", http.StatusNotFound)
+		return
+	}
+
+	if account.OwnerID != ownerID {
+		writeJSONError(w, "Unauthorized", http.StatusForbidden)
+		return
+	}
+
+	// Parse request body - array of contacts to import
+	var req struct {
+		Contacts []FileImportContact `json:"contacts"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Contacts) == 0 {
+		writeJSONError(w, "No contacts provided", http.StatusBadRequest)
+		return
+	}
+
+	// Get session path for this account
+	sessionPath := fmt.Sprintf(".session/account_%s.json", account.SessionToken)
+	if account.SessionToken == "" {
+		sessionPath = fmt.Sprintf(".session/account_%s.json", accountID)
+	}
+
+	// Import contacts
+	result, err := h.checker.ImportFromFile(r.Context(), accountID, sessionPath, req.Contacts)
+	if err != nil {
+		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]interface{}{
+		"imported": result.Imported,
+		"skipped":  result.Skipped,
+		"failed":   result.Failed,
+		"errors":   result.Errors,
+	}, http.StatusOK)
+}
+
 func (h *Handler) getOwnerID(r *http.Request) (int64, bool) {
 	cookie, err := r.Cookie("session_token")
 	if err != nil {

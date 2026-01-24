@@ -987,6 +987,285 @@ func getPeerID(peer tg.PeerClass) int64 {
 	return 0
 }
 
+// FileImportResult represents the result of importing contacts from a file
+type FileImportResult struct {
+	Imported int      `json:"imported"` // Number of contacts successfully imported
+	Skipped  int      `json:"skipped"`  // Number of contacts skipped (already exist)
+	Failed   int      `json:"failed"`   // Number of contacts that failed to resolve
+	Errors   []string `json:"errors"`   // Detailed errors for failed contacts
+}
+
+// FileImportContact represents a contact to be imported from a file
+type FileImportContact struct {
+	TelegramID int64    `json:"telegram_id"`
+	Phone      string   `json:"phone"`
+	FirstName  string   `json:"first_name"`
+	LastName   string   `json:"last_name,omitempty"`
+	Username   string   `json:"username,omitempty"`
+	Labels     []string `json:"labels,omitempty"`
+}
+
+// ImportFromFile imports contacts from a previously exported file
+// It resolves contacts by phone or username to get valid access_hash for the importing account
+func (c *Checker) ImportFromFile(ctx context.Context, accountID string, sessionPath string, importContacts []FileImportContact) (*FileImportResult, error) {
+	result := &FileImportResult{
+		Errors: make([]string, 0),
+	}
+
+	if len(importContacts) == 0 {
+		return result, nil
+	}
+
+	// Check if session file exists
+	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("session not found - please re-authenticate this account")
+	}
+
+	sessionStorage := &telegram.FileSessionStorage{
+		Path: sessionPath,
+	}
+
+	client := telegram.NewClient(c.appID, c.appHash, telegram.Options{
+		SessionStorage: sessionStorage,
+	})
+
+	err := client.Run(ctx, func(ctx context.Context) error {
+		// Get existing contacts from our store
+		existingContacts := make(map[int64]*Contact)
+		for _, contact := range c.store.GetByAccount(accountID) {
+			existingContacts[contact.TelegramID] = contact
+		}
+
+		// Get existing Telegram contacts to avoid deleting them later
+		contactsResp, err := client.API().ContactsGetContacts(ctx, 0)
+		if err != nil {
+			if tgerr.Is(err, "AUTH_KEY_UNREGISTERED") || tgerr.Is(err, "SESSION_REVOKED") {
+				return fmt.Errorf("session expired - please re-authenticate")
+			}
+			return fmt.Errorf("failed to get contacts: %w", err)
+		}
+
+		existingTgContacts := make(map[int64]bool)
+		if contacts, ok := contactsResp.(*tg.ContactsContacts); ok {
+			for _, u := range contacts.GetUsers() {
+				existingTgContacts[u.GetID()] = true
+			}
+		}
+
+		var contactsToSave []*Contact
+
+		// Separate contacts by resolution method
+		var phonesToResolve []string
+		var usernamesToResolve []string
+		phoneToImport := make(map[string]FileImportContact)
+		usernameToImport := make(map[string]FileImportContact)
+
+		for _, ic := range importContacts {
+			// Check if contact already exists in our store with valid data
+			if existing, ok := existingContacts[ic.TelegramID]; ok && existing.AccessHash != 0 {
+				// Contact already exists, merge labels
+				existing.Labels = mergeLabels(existing.Labels, ic.Labels)
+				contactsToSave = append(contactsToSave, existing)
+				result.Skipped++
+				continue
+			}
+
+			// Need to resolve this contact
+			// Prefer phone resolution, fallback to username
+			if ic.Phone != "" {
+				phonesToResolve = append(phonesToResolve, ic.Phone)
+				phoneToImport[ic.Phone] = ic
+			} else if ic.Username != "" {
+				username := strings.TrimPrefix(ic.Username, "@")
+				usernamesToResolve = append(usernamesToResolve, username)
+				usernameToImport[strings.ToLower(username)] = ic
+			} else {
+				// No phone or username, can't resolve
+				result.Failed++
+				result.Errors = append(result.Errors, fmt.Sprintf("Contact '%s %s' has no phone or username", ic.FirstName, ic.LastName))
+			}
+		}
+
+		// Resolve phones in batches
+		if len(phonesToResolve) > 0 {
+			batchSize := 15
+			for i := 0; i < len(phonesToResolve); i += batchSize {
+				end := i + batchSize
+				if end > len(phonesToResolve) {
+					end = len(phonesToResolve)
+				}
+				batch := phonesToResolve[i:end]
+
+				// Convert phones to input contacts
+				inputContacts := make([]tg.InputPhoneContact, len(batch))
+				for j, phone := range batch {
+					inputContacts[j] = tg.InputPhoneContact{
+						Phone:    phone,
+						ClientID: int64(j),
+					}
+				}
+
+				resp, err := c.importContactsWithRetry(ctx, client.API(), inputContacts)
+				if err != nil {
+					slog.Error("batch import failed", "error", err)
+					for _, phone := range batch {
+						ic := phoneToImport[phone]
+						result.Failed++
+						result.Errors = append(result.Errors, fmt.Sprintf("Failed to resolve '%s %s' by phone: %s", ic.FirstName, ic.LastName, err.Error()))
+					}
+					continue
+				}
+
+				// Track found phones
+				foundPhones := make(map[string]bool)
+				var toDelete []tg.InputUserClass
+
+				for _, userClass := range resp.GetUsers() {
+					user, ok := userClass.AsNotEmpty()
+					if !ok {
+						continue
+					}
+
+					foundPhones[user.Phone] = true
+					ic := phoneToImport[user.Phone]
+
+					photoURL := downloadUserPhoto(ctx, client.API(), user)
+					contact := &Contact{
+						AccountID:  accountID,
+						TelegramID: user.ID,
+						AccessHash: user.AccessHash,
+						Phone:      user.Phone,
+						FirstName:  ic.FirstName, // Preserve original name from file
+						LastName:   ic.LastName,
+						Username:   user.Username, // Use current username from Telegram
+						PhotoURL:   photoURL,
+						Labels:     ic.Labels,
+						IsValid:    true,
+					}
+					// Use Telegram names if file names are empty
+					if contact.FirstName == "" {
+						contact.FirstName = user.FirstName
+					}
+					if contact.LastName == "" {
+						contact.LastName = user.LastName
+					}
+					contactsToSave = append(contactsToSave, contact)
+					result.Imported++
+
+					// Schedule for deletion if not in original Telegram contacts
+					if !existingTgContacts[user.ID] {
+						toDelete = append(toDelete, &tg.InputUser{
+							UserID:     user.ID,
+							AccessHash: user.AccessHash,
+						})
+					}
+				}
+
+				// Delete imported contacts that weren't in original contact list
+				if len(toDelete) > 0 {
+					if _, err := client.API().ContactsDeleteContacts(ctx, toDelete); err != nil {
+						slog.Debug("failed to delete contacts", "error", err)
+					}
+				}
+
+				// Mark not found phones for username resolution
+				for _, phone := range batch {
+					if !foundPhones[phone] {
+						ic := phoneToImport[phone]
+						// Try username if available
+						if ic.Username != "" {
+							username := strings.TrimPrefix(ic.Username, "@")
+							usernamesToResolve = append(usernamesToResolve, username)
+							usernameToImport[strings.ToLower(username)] = ic
+						} else {
+							result.Failed++
+							result.Errors = append(result.Errors, fmt.Sprintf("Phone %s not registered on Telegram (%s %s)", phone, ic.FirstName, ic.LastName))
+						}
+					}
+				}
+			}
+		}
+
+		// Resolve usernames
+		for _, username := range usernamesToResolve {
+			ic := usernameToImport[strings.ToLower(username)]
+
+			resolved, err := c.resolveUsernameWithRetry(ctx, client.API(), username)
+			if err != nil {
+				if tgerr.Is(err, "USERNAME_NOT_OCCUPIED") || tgerr.Is(err, "USERNAME_INVALID") {
+					result.Failed++
+					result.Errors = append(result.Errors, fmt.Sprintf("Username @%s not found (%s %s)", username, ic.FirstName, ic.LastName))
+					continue
+				}
+				result.Failed++
+				result.Errors = append(result.Errors, fmt.Sprintf("Failed to resolve @%s: %s", username, err.Error()))
+				continue
+			}
+
+			// Extract user from resolved peer
+			var found bool
+			for _, userClass := range resolved.GetUsers() {
+				user, ok := userClass.AsNotEmpty()
+				if !ok {
+					continue
+				}
+
+				if strings.EqualFold(user.Username, username) {
+					photoURL := downloadUserPhoto(ctx, client.API(), user)
+					contact := &Contact{
+						AccountID:  accountID,
+						TelegramID: user.ID,
+						AccessHash: user.AccessHash,
+						Phone:      user.Phone,
+						FirstName:  ic.FirstName,
+						LastName:   ic.LastName,
+						Username:   user.Username,
+						PhotoURL:   photoURL,
+						Labels:     ic.Labels,
+						IsValid:    true,
+					}
+					// Use Telegram names if file names are empty
+					if contact.FirstName == "" {
+						contact.FirstName = user.FirstName
+					}
+					if contact.LastName == "" {
+						contact.LastName = user.LastName
+					}
+					contactsToSave = append(contactsToSave, contact)
+					result.Imported++
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				result.Failed++
+				result.Errors = append(result.Errors, fmt.Sprintf("Username @%s resolved but user not found (%s %s)", username, ic.FirstName, ic.LastName))
+			}
+		}
+
+		// Save all resolved contacts
+		if len(contactsToSave) > 0 {
+			if err := c.store.BulkCreateOrUpdate(contactsToSave); err != nil {
+				slog.Error("failed to save imported contacts", "error", err)
+				return fmt.Errorf("failed to save contacts: %w", err)
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "AUTH_KEY_UNREGISTERED") || strings.Contains(errStr, "SESSION_REVOKED") {
+			return nil, fmt.Errorf("session expired - please re-authenticate this account")
+		}
+		return nil, err
+	}
+
+	return result, nil
+}
+
 // downloadUserPhoto downloads the profile photo for a user and returns base64 encoded data URL
 func downloadUserPhoto(ctx context.Context, api *tg.Client, user *tg.User) string {
 	if user.Photo == nil {

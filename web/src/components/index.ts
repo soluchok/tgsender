@@ -7,3 +7,5 @@ export { CheckNumbersModal } from './CheckNumbersModal';
 export { SendMessagesModal } from './SendMessagesModal';
 export { EditContactModal } from './EditContactModal';
 export { AccountSettingsModal } from './AccountSettingsModal';
+export { ExportContactsModal } from './ExportContactsModal';
+export { ImportContactsModal } from './ImportContactsModal';

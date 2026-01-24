@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { UserProfile, Sidebar, CheckNumbersModal, SendMessagesModal, EditContactModal, AccountSettingsModal } from '../components';
+import { UserProfile, Sidebar, CheckNumbersModal, SendMessagesModal, EditContactModal, AccountSettingsModal, ExportContactsModal, ImportContactsModal } from '../components';
 import { useAuth, useAccounts, AccountsProvider } from '../contexts';
 import { Contact } from '../types';
 
@@ -23,6 +23,8 @@ function DashboardContent() {
   const [showCheckNumbers, setShowCheckNumbers] = useState(false);
   const [showSendMessages, setShowSendMessages] = useState(false);
   const [showAccountSettings, setShowAccountSettings] = useState(false);
+  const [showExportContacts, setShowExportContacts] = useState(false);
+  const [showImportContacts, setShowImportContacts] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [contactSearch, setContactSearch] = useState('');
@@ -331,9 +333,25 @@ function DashboardContent() {
                 </div>
 
                 <div className="card">
-                  <h3>Dump Contacts</h3>
-                  <p>Export contacts from this account</p>
-                  <button className="card-button">Open</button>
+                  <h3>Export Contacts</h3>
+                  <p>Export contacts to a JSON file</p>
+                  <button 
+                    className="card-button"
+                    onClick={() => setShowExportContacts(true)}
+                  >
+                    Open
+                  </button>
+                </div>
+
+                <div className="card">
+                  <h3>Import Contacts</h3>
+                  <p>Import contacts from a JSON file</p>
+                  <button 
+                    className="card-button"
+                    onClick={() => setShowImportContacts(true)}
+                  >
+                    Open
+                  </button>
                 </div>
 
                 <div className="card">
@@ -523,6 +541,21 @@ function DashboardContent() {
           contact={editingContact}
           onClose={() => setEditingContact(null)}
           onSave={handleContactUpdated}
+        />
+      )}
+
+      {showExportContacts && selectedAccount && (
+        <ExportContactsModal
+          contacts={contacts}
+          onClose={() => setShowExportContacts(false)}
+        />
+      )}
+
+      {showImportContacts && selectedAccount && (
+        <ImportContactsModal
+          account={selectedAccount}
+          onClose={() => setShowImportContacts(false)}
+          onImported={fetchContacts}
         />
       )}
     </div>
