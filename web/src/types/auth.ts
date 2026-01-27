@@ -43,6 +43,15 @@ export interface QRAuthState {
   error?: string;
 }
 
+// Spam status from @SpamBot
+export interface SpamStatus {
+  is_limited: boolean;
+  limited_until?: string;
+  message: string;
+  checked_at: string;
+  from_cache: boolean;
+}
+
 // Contact (verified phone number)
 export interface Contact {
   id: string;

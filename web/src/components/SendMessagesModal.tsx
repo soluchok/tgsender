@@ -194,18 +194,10 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
       newLabels.add(label);
     }
     setSelectedLabels(newLabels);
-
-    const filteredIds = new Set(
-      contacts
-        .filter(c => newLabels.size === 0 || c.labels?.some(l => newLabels.has(l)))
-        .map(c => c.id)
-    );
-    setSelectedIds(filteredIds);
   };
 
   const handleClearLabelFilter = () => {
     setSelectedLabels(new Set());
-    setSelectedIds(new Set(contacts.map(c => c.id)));
   };
 
   const handleSelectAll = () => {

@@ -1,12 +1,14 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
-import { TelegramAccount, QRAuthState } from '../types';
+import { TelegramAccount, QRAuthState, SpamStatus } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 interface AccountsContextType {
   accounts: TelegramAccount[];
   selectedAccount: TelegramAccount | null;
+  spamStatus: SpamStatus | null;
   isLoading: boolean;
+  isCheckingSpam: boolean;
   error: string | null;
   qrAuth: QRAuthState;
   fetchAccounts: () => Promise<void>;
@@ -16,6 +18,7 @@ interface AccountsContextType {
   cancelQRAuth: () => void;
   submitPassword: (password: string) => Promise<void>;
   removeAccount: (id: string) => Promise<void>;
+  checkSpamStatus: (forceRefresh?: boolean) => Promise<void>;
 }
 
 const AccountsContext = createContext<AccountsContextType | undefined>(undefined);
@@ -23,7 +26,9 @@ const AccountsContext = createContext<AccountsContextType | undefined>(undefined
 export function AccountsProvider({ children }: { children: ReactNode }) {
   const [accounts, setAccounts] = useState<TelegramAccount[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<TelegramAccount | null>(null);
+  const [spamStatus, setSpamStatus] = useState<SpamStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isCheckingSpam, setIsCheckingSpam] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [qrAuth, setQRAuth] = useState<QRAuthState>({ status: 'idle' });
   const pollIntervalRef = useRef<number | null>(null);
@@ -52,6 +57,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
 
   const selectAccount = useCallback(async (account: TelegramAccount | null) => {
     setSelectedAccount(account);
+    setSpamStatus(null); // Clear spam status when changing accounts
 
     if (account) {
       // Validate session when selecting an account
@@ -72,6 +78,11 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
               a.id === account.id ? { ...a, ...updates } : a
             ));
             setSelectedAccount(prev => prev ? { ...prev, ...updates } : null);
+
+            // Check spam status if account is active
+            if (data.is_active) {
+              checkSpamStatusForAccount(account.id);
+            }
           }
         }
       } catch (err) {
@@ -79,6 +90,32 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
       }
     }
   }, []);
+
+  const checkSpamStatusForAccount = async (accountId: string, forceRefresh = false) => {
+    setIsCheckingSpam(true);
+    try {
+      const url = forceRefresh 
+        ? `${API_URL}/api/accounts/${accountId}/spam-status?refresh=true`
+        : `${API_URL}/api/accounts/${accountId}/spam-status`;
+      const response = await fetch(url, {
+        credentials: 'include',
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setSpamStatus(data);
+      }
+    } catch (err) {
+      console.error('Failed to check spam status:', err);
+    } finally {
+      setIsCheckingSpam(false);
+    }
+  };
+
+  const checkSpamStatus = useCallback(async (forceRefresh = false) => {
+    if (!selectedAccount) return;
+    await checkSpamStatusForAccount(selectedAccount.id, forceRefresh);
+  }, [selectedAccount]);
 
   const updateAccount = useCallback((account: TelegramAccount) => {
     setAccounts(prev => prev.map(a => a.id === account.id ? account : a));
@@ -293,7 +330,9 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
       value={{
         accounts,
         selectedAccount,
+        spamStatus,
         isLoading,
+        isCheckingSpam,
         error,
         qrAuth,
         fetchAccounts,
@@ -303,6 +342,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
         cancelQRAuth,
         submitPassword,
         removeAccount,
+        checkSpamStatus,
       }}
     >
       {children}

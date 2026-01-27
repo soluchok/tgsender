@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAccounts } from '../contexts';
 import { TelegramAccount } from '../types';
@@ -8,9 +8,27 @@ export function Sidebar() {
   const { accounts, selectedAccount, isLoading } = useAccounts();
   const navigate = useNavigate();
   const [showAddModal, setShowAddModal] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setOpenMenuId(null);
+    };
+
+    if (openMenuId) {
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [openMenuId]);
 
   const handleSelectAccount = (account: TelegramAccount) => {
+    setOpenMenuId(null);
     navigate(`/dashboard/${account.id}`);
+  };
+
+  const handleToggleMenu = (accountId: string) => {
+    setOpenMenuId(openMenuId === accountId ? null : accountId);
   };
 
   return (
@@ -50,6 +68,9 @@ export function Sidebar() {
                 account={account}
                 isSelected={selectedAccount?.id === account.id}
                 onSelect={() => handleSelectAccount(account)}
+                showMenu={openMenuId === account.id}
+                onToggleMenu={() => handleToggleMenu(account.id)}
+                onCloseMenu={() => setOpenMenuId(null)}
               />
             ))
           )}
@@ -82,12 +103,14 @@ interface AccountItemProps {
   account: TelegramAccount;
   isSelected: boolean;
   onSelect: () => void;
+  showMenu: boolean;
+  onToggleMenu: () => void;
+  onCloseMenu: () => void;
 }
 
-function AccountItem({ account, isSelected, onSelect }: AccountItemProps) {
+function AccountItem({ account, isSelected, onSelect, showMenu, onToggleMenu, onCloseMenu }: AccountItemProps) {
   const { removeAccount } = useAccounts();
   const navigate = useNavigate();
-  const [showMenu, setShowMenu] = useState(false);
 
   const displayName = [account.first_name, account.last_name]
     .filter(Boolean)
@@ -101,7 +124,7 @@ function AccountItem({ account, isSelected, onSelect }: AccountItemProps) {
         navigate('/dashboard', { replace: true });
       }
     }
-    setShowMenu(false);
+    onCloseMenu();
   };
 
   return (
@@ -125,7 +148,6 @@ function AccountItem({ account, isSelected, onSelect }: AccountItemProps) {
         {account.username && (
           <span className="account-username">@{account.username}</span>
         )}
-        <span className="account-phone">{account.phone}</span>
       </div>
 
       <div className="account-actions">
@@ -133,7 +155,7 @@ function AccountItem({ account, isSelected, onSelect }: AccountItemProps) {
           className="menu-btn"
           onClick={(e) => {
             e.stopPropagation();
-            setShowMenu(!showMenu);
+            onToggleMenu();
           }}
         >
           &#8942;

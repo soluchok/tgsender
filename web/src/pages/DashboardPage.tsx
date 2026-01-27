@@ -17,7 +17,7 @@ interface ImportProgress {
 
 function DashboardContent() {
   const { user } = useAuth();
-  const { selectedAccount, accounts, selectAccount, updateAccount } = useAccounts();
+  const { selectedAccount, accounts, selectAccount, updateAccount, spamStatus, isCheckingSpam, checkSpamStatus } = useAccounts();
   const { accountId } = useParams<{ accountId?: string }>();
   const navigate = useNavigate();
   const [showCheckNumbers, setShowCheckNumbers] = useState(false);
@@ -318,6 +318,51 @@ function DashboardContent() {
                 <span className={`status-badge ${selectedAccount.is_active ? 'active' : 'inactive'}`}>
                   {selectedAccount.is_active ? 'Active' : 'Inactive'}
                 </span>
+                
+                {/* Inline Spam Status Indicator */}
+                <div className="spam-status-inline">
+                  {isCheckingSpam && (
+                    <div className="spam-indicator checking" title="Checking spam status...">
+                      <div className="loading-spinner small" />
+                    </div>
+                  )}
+                  {!isCheckingSpam && spamStatus?.is_limited && (
+                    <div className="spam-indicator limited">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                        <line x1="12" y1="9" x2="12" y2="13"></line>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                      </svg>
+                      <span className="spam-limit-text">
+                        Limited{spamStatus.limited_until && ` until ${new Date(spamStatus.limited_until).toLocaleString()}`}
+                      </span>
+                    </div>
+                  )}
+                  {!isCheckingSpam && spamStatus && !spamStatus.is_limited && (
+                    <div 
+                      className="spam-indicator good" 
+                      title={`Good standing${spamStatus.checked_at ? ` - Checked: ${new Date(spamStatus.checked_at).toLocaleString()}${spamStatus.from_cache ? ' (cached)' : ''}` : ''}`}
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                      </svg>
+                    </div>
+                  )}
+                  {!isCheckingSpam && (
+                    <button 
+                      className="spam-refresh-btn-inline"
+                      onClick={() => checkSpamStatus(true)}
+                      title="Refresh spam status"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <polyline points="1 20 1 14 7 14"></polyline>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                      </svg>
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="dashboard-cards">

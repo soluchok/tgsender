@@ -1,4 +1,5 @@
-import { Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { TelegramLoginButton } from '../components';
 import { useAuth } from '../contexts';
 
@@ -7,6 +8,13 @@ const TELEGRAM_BOT_NAME = import.meta.env.VITE_TELEGRAM_BOT_NAME || 'your_bot_na
 
 export function LoginPage() {
   const { isAuthenticated, isLoading, error } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (isAuthenticated && !isLoading) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [isAuthenticated, isLoading, navigate]);
 
   if (isLoading) {
     return (
@@ -19,8 +27,16 @@ export function LoginPage() {
     );
   }
 
+  // Don't render login form if already authenticated (will navigate away)
   if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
+    return (
+      <div className="page login-page">
+        <div className="loading-container">
+          <div className="loading-spinner" />
+          <p>Redirecting...</p>
+        </div>
+      </div>
+    );
   }
 
   return (

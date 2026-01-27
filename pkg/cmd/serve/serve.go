@@ -78,8 +78,11 @@ func New() *cobra.Command {
 			// Initialize session validator
 			accountValidator := accounts.NewValidator(accountStore, cfg.AppID, cfg.AppHash)
 
+			// Initialize spam checker
+			spamChecker := accounts.NewSpamChecker(cfg.AppID, cfg.AppHash)
+
 			// Initialize accounts handler
-			accountsHandler := accounts.NewHandler(accountStore, qrManager, accountValidator, authHandler)
+			accountsHandler := accounts.NewHandler(accountStore, qrManager, accountValidator, spamChecker, authHandler)
 
 			// Initialize contacts store and handler
 			contactStore, err := contacts.NewStore(".data")
@@ -101,6 +104,7 @@ func New() *cobra.Command {
 			mux.HandleFunc("/api/accounts", accountsHandler.HandleListAccounts)
 			mux.HandleFunc("/api/accounts/{id}", accountsHandler.HandleDeleteAccount)
 			mux.HandleFunc("/api/accounts/{id}/validate", accountsHandler.HandleValidateAccount)
+			mux.HandleFunc("/api/accounts/{id}/spam-status", accountsHandler.HandleCheckSpamStatus)
 			mux.HandleFunc("/api/accounts/{id}/settings", func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					accountsHandler.HandleGetSettings(w, r)
