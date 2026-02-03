@@ -36,6 +36,7 @@ type ImportJob struct {
 	Imported   int        `json:"imported"` // Number of contacts imported
 	Skipped    int        `json:"skipped"`  // Number of contacts skipped
 	Error      string     `json:"error,omitempty"`
+	ProxyURL   string     `json:"-"` // Proxy URL for Telegram connection (not exposed in JSON)
 	StartedAt  time.Time  `json:"started_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 }
@@ -58,16 +59,16 @@ func NewJobManager(checker *Checker) *JobManager {
 }
 
 // StartImport starts an import job for an account, or returns existing running job
-func (m *JobManager) StartImport(accountID, sessionPath string) (*ImportJob, bool) {
-	return m.startImportWithType(accountID, sessionPath, ImportTypeChats)
+func (m *JobManager) StartImport(accountID, sessionPath, proxyURL string) (*ImportJob, bool) {
+	return m.startImportWithType(accountID, sessionPath, proxyURL, ImportTypeChats)
 }
 
 // StartImportContacts starts an import contacts job for an account
-func (m *JobManager) StartImportContacts(accountID, sessionPath string) (*ImportJob, bool) {
-	return m.startImportWithType(accountID, sessionPath, ImportTypeContacts)
+func (m *JobManager) StartImportContacts(accountID, sessionPath, proxyURL string) (*ImportJob, bool) {
+	return m.startImportWithType(accountID, sessionPath, proxyURL, ImportTypeContacts)
 }
 
-func (m *JobManager) startImportWithType(accountID, sessionPath string, importType ImportType) (*ImportJob, bool) {
+func (m *JobManager) startImportWithType(accountID, sessionPath, proxyURL string, importType ImportType) (*ImportJob, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -87,6 +88,7 @@ func (m *JobManager) startImportWithType(accountID, sessionPath string, importTy
 		AccountID:  accountID,
 		ImportType: importType,
 		Status:     JobStatusPending,
+		ProxyURL:   proxyURL,
 		StartedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}
@@ -151,7 +153,7 @@ func (m *JobManager) runImport(job *ImportJob, sessionPath string) {
 
 	if job.ImportType == ImportTypeContacts {
 		// Import from Telegram contacts
-		result, err = m.checker.ImportFromContacts(ctx, job.AccountID, sessionPath, func(imported, skipped int) {
+		result, err = m.checker.ImportFromContacts(ctx, job.AccountID, sessionPath, job.ProxyURL, func(imported, skipped int) {
 			m.mu.Lock()
 			job.Imported = imported
 			job.Skipped = skipped
@@ -160,7 +162,7 @@ func (m *JobManager) runImport(job *ImportJob, sessionPath string) {
 		})
 	} else {
 		// Import from chats (default)
-		result, err = m.checker.ImportFromChatsWithProgress(ctx, job.AccountID, sessionPath, func(progress, imported, skipped int) {
+		result, err = m.checker.ImportFromChatsWithProgress(ctx, job.AccountID, sessionPath, job.ProxyURL, func(progress, imported, skipped int) {
 			m.mu.Lock()
 			job.Progress = progress
 			job.Imported = imported

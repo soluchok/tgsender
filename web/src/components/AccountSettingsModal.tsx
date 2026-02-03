@@ -11,9 +11,12 @@ interface AccountSettingsModalProps {
 
 export function AccountSettingsModal({ account, onClose, onSave }: AccountSettingsModalProps) {
   const [openAIToken, setOpenAIToken] = useState('');
+  const [proxyUrl, setProxyUrl] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [proxyTestResult, setProxyTestResult] = useState<{ success: boolean; error?: string } | null>(null);
   const [showToken, setShowToken] = useState(false);
 
   // Fetch current settings
@@ -27,6 +30,7 @@ export function AccountSettingsModal({ account, onClose, onSave }: AccountSettin
         if (response.ok) {
           const data = await response.json();
           setOpenAIToken(data.openai_token || '');
+          setProxyUrl(data.proxy_url || '');
         }
       } catch (err) {
         console.error('Failed to fetch settings:', err);
@@ -51,6 +55,7 @@ export function AccountSettingsModal({ account, onClose, onSave }: AccountSettin
         },
         body: JSON.stringify({
           openai_token: openAIToken.trim(),
+          proxy_url: proxyUrl.trim(),
         }),
       });
 
@@ -68,8 +73,51 @@ export function AccountSettingsModal({ account, onClose, onSave }: AccountSettin
     }
   };
 
+  const handleTestProxy = async () => {
+    if (!proxyUrl.trim()) {
+      setProxyTestResult({ success: false, error: 'Please enter a proxy URL first' });
+      return;
+    }
+
+    setIsTesting(true);
+    setProxyTestResult(null);
+
+    try {
+      const response = await fetch(`${API_URL}/api/accounts/${account.id}/test-proxy`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          proxy_url: proxyUrl.trim(),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to test proxy');
+      }
+
+      setProxyTestResult(data);
+    } catch (err) {
+      setProxyTestResult({
+        success: false,
+        error: err instanceof Error ? err.message : 'Failed to test proxy',
+      });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
   const handleClearToken = () => {
     setOpenAIToken('');
+  };
+
+  const handleClearProxy = () => {
+    setProxyUrl('');
+    setProxyTestResult(null);
   };
 
   return (
@@ -99,6 +147,80 @@ export function AccountSettingsModal({ account, onClose, onSave }: AccountSettin
             </div>
           ) : (
             <>
+              {/* Proxy Configuration Section */}
+              <div className="form-group">
+                <label htmlFor="proxy-url">Proxy Configuration</label>
+                <p className="form-hint">
+                  Configure a proxy (SOCKS5 or HTTP) for all Telegram API calls from this account.
+                  Format: <code>socks5://user:pass@host:port</code> or <code>http://host:port</code>
+                </p>
+                <div className="proxy-input-wrapper">
+                  <input
+                    id="proxy-url"
+                    type="text"
+                    value={proxyUrl}
+                    onChange={(e) => {
+                      setProxyUrl(e.target.value);
+                      setProxyTestResult(null);
+                    }}
+                    placeholder="socks5://host:port"
+                    className="proxy-input"
+                    disabled={isSaving || isTesting}
+                  />
+                  {proxyUrl && (
+                    <button
+                      type="button"
+                      className="proxy-clear-btn"
+                      onClick={handleClearProxy}
+                      title="Clear proxy"
+                    >
+                      &times;
+                    </button>
+                  )}
+                </div>
+                <div className="proxy-test-section">
+                  <button
+                    type="button"
+                    className="btn-secondary btn-small"
+                    onClick={handleTestProxy}
+                    disabled={isTesting || !proxyUrl.trim()}
+                  >
+                    {isTesting ? (
+                      <>
+                        <div className="loading-spinner small" />
+                        <span>Testing...</span>
+                      </>
+                    ) : (
+                      'Test Connection'
+                    )}
+                  </button>
+                  {proxyTestResult && (
+                    <span className={`proxy-test-result ${proxyTestResult.success ? 'success' : 'error'}`}>
+                      {proxyTestResult.success ? (
+                        <>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                          </svg>
+                          Connection successful
+                        </>
+                      ) : (
+                        <>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="15" y1="9" x2="9" y2="15"></line>
+                            <line x1="9" y1="9" x2="15" y2="15"></line>
+                          </svg>
+                          {proxyTestResult.error}
+                        </>
+                      )}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="settings-divider" />
+
+              {/* OpenAI Token Section */}
               <div className="form-group">
                 <label htmlFor="openai-token">OpenAI API Token</label>
                 <p className="form-hint">

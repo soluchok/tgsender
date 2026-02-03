@@ -40,6 +40,7 @@ type SendJob struct {
 	UpdatedAt   time.Time         `json:"updated_at"`
 	ContactIDs  []string          `json:"contact_ids"`         // Original contact IDs
 	SessionPath string            `json:"session_path"`        // Session path for retries
+	ProxyURL    string            `json:"proxy_url,omitempty"` // Proxy URL for Telegram connection
 	AIPrompt    string            `json:"ai_prompt,omitempty"` // AI rewriting instructions
 	OpenAIToken string            `json:"-"`                   // OpenAI token (not persisted)
 }
@@ -293,7 +294,7 @@ func NewJobManager(store *JobStore, sender *Sender) *JobManager {
 }
 
 // StartSend starts a send job for an account
-func (m *JobManager) StartSend(accountID, sessionPath, message string, contactIDs []string, delayMinMS, delayMaxMS int, aiPrompt, openAIToken string) (*SendJob, error) {
+func (m *JobManager) StartSend(accountID, sessionPath, proxyURL, message string, contactIDs []string, delayMinMS, delayMaxMS int, aiPrompt, openAIToken string) (*SendJob, error) {
 	job := &SendJob{
 		ID:          generateJobID(),
 		AccountID:   accountID,
@@ -307,6 +308,7 @@ func (m *JobManager) StartSend(accountID, sessionPath, message string, contactID
 		UpdatedAt:   time.Now(),
 		ContactIDs:  contactIDs,
 		SessionPath: sessionPath,
+		ProxyURL:    proxyURL,
 		AIPrompt:    aiPrompt,
 		OpenAIToken: openAIToken,
 	}
@@ -351,7 +353,8 @@ func (m *JobManager) RetryFailed(jobID string) (*SendJob, error) {
 		UpdatedAt:   time.Now(),
 		ContactIDs:  failedIDs,
 		SessionPath: oldJob.SessionPath,
-		AIPrompt:    "", // No AI for retries
+		ProxyURL:    oldJob.ProxyURL, // Reuse proxy from original job
+		AIPrompt:    "",              // No AI for retries
 	}
 
 	if err := m.store.Create(job); err != nil {
@@ -393,7 +396,7 @@ func (m *JobManager) runSend(jobID string, openAIToken string) {
 	defer cancel()
 
 	// Run the send with progress callback
-	result, err := m.sender.SendToContactsWithProgress(ctx, job.SessionPath, job.ContactIDs, job.Message, job.DelayMinMS, job.DelayMaxMS, job.AIPrompt, openAIToken, func(sent, failed int, results []RecipientResult) {
+	result, err := m.sender.SendToContactsWithProgress(ctx, job.SessionPath, job.ProxyURL, job.ContactIDs, job.Message, job.DelayMinMS, job.DelayMaxMS, job.AIPrompt, openAIToken, func(sent, failed int, results []RecipientResult) {
 		m.store.UpdateProgress(jobID, sent, failed, results)
 	})
 

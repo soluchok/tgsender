@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/soluchok/tgsender/pkg/auth"
+	tgclient "github.com/soluchok/tgsender/pkg/telegram"
 )
 
 // Handler provides HTTP handlers for account management
@@ -206,15 +207,34 @@ func (h *Handler) HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// Parse request body
 	var req struct {
 		OpenAIToken *string `json:"openai_token"`
+		ProxyURL    *string `json:"proxy_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
+	// Track if proxy changed (need to revalidate session)
+	proxyChanged := false
+
 	// Update settings
 	if req.OpenAIToken != nil {
 		account.OpenAIToken = *req.OpenAIToken
+	}
+
+	if req.ProxyURL != nil {
+		newProxyURL := *req.ProxyURL
+		// Validate proxy URL format if not empty
+		if newProxyURL != "" {
+			if _, err := tgclient.ParseProxyURL(newProxyURL); err != nil {
+				writeJSONError(w, "Invalid proxy URL: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		if account.ProxyURL != newProxyURL {
+			proxyChanged = true
+			account.ProxyURL = newProxyURL
+		}
 	}
 
 	if err := h.store.Update(account); err != nil {
@@ -222,8 +242,16 @@ func (h *Handler) HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If proxy changed, trigger session revalidation in background
+	if proxyChanged && account.IsActive {
+		go func() {
+			h.validator.ValidateAndUpdateStatus(r.Context(), id)
+		}()
+	}
+
 	writeJSON(w, map[string]interface{}{
-		"account": account,
+		"account":       account,
+		"proxy_changed": proxyChanged,
 	}, http.StatusOK)
 }
 
@@ -265,6 +293,7 @@ func (h *Handler) HandleGetSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{
 		"has_openai_token": hasOpenAIToken,
 		"openai_token":     account.OpenAIToken, // Frontend needs this to pre-fill
+		"proxy_url":        account.ProxyURL,
 	}, http.StatusOK)
 }
 
@@ -372,6 +401,78 @@ func (h *Handler) getOwnerID(r *http.Request) (int64, bool) {
 	}
 
 	return session.User.ID, true
+}
+
+// HandleTestProxy handles POST /api/accounts/{id}/test-proxy
+func (h *Handler) HandleTestProxy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ownerID, ok := h.getOwnerID(r)
+	if !ok {
+		writeJSONError(w, "Not authenticated", http.StatusUnauthorized)
+		return
+	}
+
+	// Extract account ID from path
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSONError(w, "Account ID required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify account exists and belongs to this owner
+	account, ok := h.store.Get(id)
+	if !ok {
+		writeJSONError(w, "Account not found", http.StatusNotFound)
+		return
+	}
+
+	if account.OwnerID != ownerID {
+		writeJSONError(w, "Unauthorized", http.StatusForbidden)
+		return
+	}
+
+	// Parse request body - can test with a specific URL or use account's configured proxy
+	var req struct {
+		ProxyURL string `json:"proxy_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Use provided URL or fall back to account's configured proxy
+	proxyURL := req.ProxyURL
+	if proxyURL == "" {
+		proxyURL = account.ProxyURL
+	}
+
+	if proxyURL == "" {
+		writeJSONError(w, "No proxy URL provided", http.StatusBadRequest)
+		return
+	}
+
+	// Validate proxy URL format
+	if _, err := tgclient.ParseProxyURL(proxyURL); err != nil {
+		writeJSONError(w, "Invalid proxy URL: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Test proxy connection
+	if err := tgclient.TestProxy(r.Context(), proxyURL); err != nil {
+		writeJSON(w, map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		}, http.StatusOK)
+		return
+	}
+
+	writeJSON(w, map[string]interface{}{
+		"success": true,
+	}, http.StatusOK)
 }
 
 // Helper functions for JSON responses

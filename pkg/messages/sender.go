@@ -6,18 +6,17 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
-	"os"
 	"strings"
 	"text/template"
 	"time"
 
-	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
 
 	"github.com/soluchok/tgsender/pkg/contacts"
 	"github.com/soluchok/tgsender/pkg/openai"
+	tgclient "github.com/soluchok/tgsender/pkg/telegram"
 )
 
 // SendResult represents the result of sending messages
@@ -54,7 +53,7 @@ func NewSender(contactStore *contacts.Store, appID int, appHash string) *Sender 
 }
 
 // SendToContacts sends a message to the specified contacts
-func (s *Sender) SendToContacts(ctx context.Context, sessionPath string, contactIDs []string, messageText string, delayMinMS, delayMaxMS int) (*SendResult, error) {
+func (s *Sender) SendToContacts(ctx context.Context, sessionPath, proxyURL string, contactIDs []string, messageText string, delayMinMS, delayMaxMS int) (*SendResult, error) {
 	result := &SendResult{
 		Results: make([]RecipientResult, 0),
 	}
@@ -65,11 +64,6 @@ func (s *Sender) SendToContacts(ctx context.Context, sessionPath string, contact
 
 	if messageText == "" {
 		return nil, fmt.Errorf("message text is required")
-	}
-
-	// Check if session file exists
-	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("session not found - please re-authenticate this account")
 	}
 
 	// Get contacts by IDs
@@ -87,16 +81,12 @@ func (s *Sender) SendToContacts(ctx context.Context, sessionPath string, contact
 
 	result.Total = len(contactsToSend)
 
-	// Create session storage
-	sessionStorage := &telegram.FileSessionStorage{
-		Path: sessionPath,
+	client, err := tgclient.CreateClient(s.appID, s.appHash, sessionPath, proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client: %w", err)
 	}
 
-	client := telegram.NewClient(s.appID, s.appHash, telegram.Options{
-		SessionStorage: sessionStorage,
-	})
-
-	err := client.Run(ctx, func(ctx context.Context) error {
+	err = client.Run(ctx, func(ctx context.Context) error {
 		sender := message.NewSender(client.API())
 
 		// Track already sent to avoid duplicates
@@ -195,7 +185,7 @@ func (s *Sender) SendToContacts(ctx context.Context, sessionPath string, contact
 }
 
 // SendToContactsWithProgress sends a message to the specified contacts with progress callback
-func (s *Sender) SendToContactsWithProgress(ctx context.Context, sessionPath string, contactIDs []string, messageText string, delayMinMS, delayMaxMS int, aiPrompt, openAIToken string, onProgress func(sent, failed int, results []RecipientResult)) (*SendResult, error) {
+func (s *Sender) SendToContactsWithProgress(ctx context.Context, sessionPath, proxyURL string, contactIDs []string, messageText string, delayMinMS, delayMaxMS int, aiPrompt, openAIToken string, onProgress func(sent, failed int, results []RecipientResult)) (*SendResult, error) {
 	result := &SendResult{
 		Results: make([]RecipientResult, 0),
 	}
@@ -206,11 +196,6 @@ func (s *Sender) SendToContactsWithProgress(ctx context.Context, sessionPath str
 
 	if messageText == "" {
 		return nil, fmt.Errorf("message text is required")
-	}
-
-	// Check if session file exists
-	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("session not found - please re-authenticate this account")
 	}
 
 	// Get contacts by IDs
@@ -235,16 +220,12 @@ func (s *Sender) SendToContactsWithProgress(ctx context.Context, sessionPath str
 		slog.Info("AI message rewriting enabled")
 	}
 
-	// Create session storage
-	sessionStorage := &telegram.FileSessionStorage{
-		Path: sessionPath,
+	client, err := tgclient.CreateClient(s.appID, s.appHash, sessionPath, proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client: %w", err)
 	}
 
-	client := telegram.NewClient(s.appID, s.appHash, telegram.Options{
-		SessionStorage: sessionStorage,
-	})
-
-	err := client.Run(ctx, func(ctx context.Context) error {
+	err = client.Run(ctx, func(ctx context.Context) error {
 		sender := message.NewSender(client.API())
 
 		// Track already sent to avoid duplicates

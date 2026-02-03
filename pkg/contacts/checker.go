@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/downloader"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
+
+	tgclient "github.com/soluchok/tgsender/pkg/telegram"
 )
 
 // CheckResult represents the result of checking phone numbers
@@ -49,7 +50,7 @@ func NewChecker(store *Store, appID int, appHash string) *Checker {
 
 // CheckContacts verifies if phones/usernames are registered on Telegram
 // It uses the specified account's session to make the API calls
-func (c *Checker) CheckContacts(ctx context.Context, accountID string, sessionPath string, input *CheckInput) (*CheckResult, error) {
+func (c *Checker) CheckContacts(ctx context.Context, accountID string, sessionPath string, proxyURL string, input *CheckInput) (*CheckResult, error) {
 	result := &CheckResult{
 		Valid:   make([]*Contact, 0),
 		Invalid: make([]string, 0),
@@ -66,16 +67,13 @@ func (c *Checker) CheckContacts(ctx context.Context, accountID string, sessionPa
 		return nil, fmt.Errorf("session not found - please re-authenticate this account by removing and adding it again")
 	}
 
-	// Create session storage for this account
-	sessionStorage := &telegram.FileSessionStorage{
-		Path: sessionPath,
+	// Create Telegram client with optional proxy
+	client, err := tgclient.CreateClient(c.appID, c.appHash, sessionPath, proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create telegram client: %w", err)
 	}
 
-	client := telegram.NewClient(c.appID, c.appHash, telegram.Options{
-		SessionStorage: sessionStorage,
-	})
-
-	err := client.Run(ctx, func(ctx context.Context) error {
+	err = client.Run(ctx, func(ctx context.Context) error {
 		// Get existing contacts to avoid deleting them later
 		contactsResp, err := client.API().ContactsGetContacts(ctx, 0)
 		if err != nil {
@@ -382,7 +380,7 @@ type ChatContactsResult struct {
 }
 
 // ImportFromChats imports contacts from all dialogs (private chats) of the account
-func (c *Checker) ImportFromChats(ctx context.Context, accountID string, sessionPath string) (*ChatContactsResult, error) {
+func (c *Checker) ImportFromChats(ctx context.Context, accountID string, sessionPath string, proxyURL string) (*ChatContactsResult, error) {
 	result := &ChatContactsResult{
 		Errors: make([]string, 0),
 	}
@@ -392,15 +390,13 @@ func (c *Checker) ImportFromChats(ctx context.Context, accountID string, session
 		return nil, fmt.Errorf("session not found - please re-authenticate this account")
 	}
 
-	sessionStorage := &telegram.FileSessionStorage{
-		Path: sessionPath,
+	// Create Telegram client with optional proxy
+	client, err := tgclient.CreateClient(c.appID, c.appHash, sessionPath, proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create telegram client: %w", err)
 	}
 
-	client := telegram.NewClient(c.appID, c.appHash, telegram.Options{
-		SessionStorage: sessionStorage,
-	})
-
-	err := client.Run(ctx, func(ctx context.Context) error {
+	err = client.Run(ctx, func(ctx context.Context) error {
 		// Get existing contacts from our store to check for duplicates
 		existingContacts := make(map[int64]bool)
 		for _, contact := range c.store.GetByAccount(accountID) {
@@ -553,7 +549,7 @@ func (c *Checker) ImportFromChats(ctx context.Context, accountID string, session
 }
 
 // ImportFromChatsWithProgress imports contacts from all dialogs with progress callback
-func (c *Checker) ImportFromChatsWithProgress(ctx context.Context, accountID string, sessionPath string, onProgress func(progress, imported, skipped int)) (*ChatContactsResult, error) {
+func (c *Checker) ImportFromChatsWithProgress(ctx context.Context, accountID string, sessionPath string, proxyURL string, onProgress func(progress, imported, skipped int)) (*ChatContactsResult, error) {
 	result := &ChatContactsResult{
 		Errors: make([]string, 0),
 	}
@@ -563,15 +559,13 @@ func (c *Checker) ImportFromChatsWithProgress(ctx context.Context, accountID str
 		return nil, fmt.Errorf("session not found - please re-authenticate this account")
 	}
 
-	sessionStorage := &telegram.FileSessionStorage{
-		Path: sessionPath,
+	// Create Telegram client with optional proxy
+	client, err := tgclient.CreateClient(c.appID, c.appHash, sessionPath, proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create telegram client: %w", err)
 	}
 
-	client := telegram.NewClient(c.appID, c.appHash, telegram.Options{
-		SessionStorage: sessionStorage,
-	})
-
-	err := client.Run(ctx, func(ctx context.Context) error {
+	err = client.Run(ctx, func(ctx context.Context) error {
 		// Get existing contacts from our store to check for duplicates
 		existingContacts := make(map[int64]bool)
 		for _, contact := range c.store.GetByAccount(accountID) {
@@ -828,7 +822,7 @@ func (c *Checker) ImportFromChatsWithProgress(ctx context.Context, accountID str
 }
 
 // ImportFromContacts imports contacts from Telegram's contact list
-func (c *Checker) ImportFromContacts(ctx context.Context, accountID string, sessionPath string, onProgress func(imported, skipped int)) (*ChatContactsResult, error) {
+func (c *Checker) ImportFromContacts(ctx context.Context, accountID string, sessionPath string, proxyURL string, onProgress func(imported, skipped int)) (*ChatContactsResult, error) {
 	result := &ChatContactsResult{
 		Errors: make([]string, 0),
 	}
@@ -838,15 +832,13 @@ func (c *Checker) ImportFromContacts(ctx context.Context, accountID string, sess
 		return nil, fmt.Errorf("session not found - please re-authenticate this account")
 	}
 
-	sessionStorage := &telegram.FileSessionStorage{
-		Path: sessionPath,
+	// Create Telegram client with optional proxy
+	client, err := tgclient.CreateClient(c.appID, c.appHash, sessionPath, proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create telegram client: %w", err)
 	}
 
-	client := telegram.NewClient(c.appID, c.appHash, telegram.Options{
-		SessionStorage: sessionStorage,
-	})
-
-	err := client.Run(ctx, func(ctx context.Context) error {
+	err = client.Run(ctx, func(ctx context.Context) error {
 		// Get existing contacts from our store to check for duplicates
 		existingContacts := make(map[int64]bool)
 		for _, contact := range c.store.GetByAccount(accountID) {
@@ -1030,7 +1022,7 @@ type FileImportContact struct {
 
 // ImportFromFile imports contacts from a previously exported file
 // It resolves contacts by phone or username to get valid access_hash for the importing account
-func (c *Checker) ImportFromFile(ctx context.Context, accountID string, sessionPath string, importContacts []FileImportContact) (*FileImportResult, error) {
+func (c *Checker) ImportFromFile(ctx context.Context, accountID string, sessionPath string, proxyURL string, importContacts []FileImportContact) (*FileImportResult, error) {
 	result := &FileImportResult{
 		Errors: make([]string, 0),
 	}
@@ -1044,15 +1036,13 @@ func (c *Checker) ImportFromFile(ctx context.Context, accountID string, sessionP
 		return nil, fmt.Errorf("session not found - please re-authenticate this account")
 	}
 
-	sessionStorage := &telegram.FileSessionStorage{
-		Path: sessionPath,
+	// Create Telegram client with optional proxy
+	client, err := tgclient.CreateClient(c.appID, c.appHash, sessionPath, proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create telegram client: %w", err)
 	}
 
-	client := telegram.NewClient(c.appID, c.appHash, telegram.Options{
-		SessionStorage: sessionStorage,
-	})
-
-	err := client.Run(ctx, func(ctx context.Context) error {
+	err = client.Run(ctx, func(ctx context.Context) error {
 		// Get existing contacts from our store
 		existingContacts := make(map[int64]*Contact)
 		for _, contact := range c.store.GetByAccount(accountID) {

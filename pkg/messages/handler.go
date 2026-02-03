@@ -113,7 +113,7 @@ func (h *Handler) HandleSendMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Start async send job
-	job, err := h.jobManager.StartSend(accountID, sessionPath, req.Message, req.ContactIDs, req.DelayMinMS, req.DelayMaxMS, req.AIPrompt, openAIToken)
+	job, err := h.jobManager.StartSend(accountID, sessionPath, account.ProxyURL, req.Message, req.ContactIDs, req.DelayMinMS, req.DelayMaxMS, req.AIPrompt, openAIToken)
 	if err != nil {
 		writeJSONError(w, fmt.Sprintf("Failed to start send job: %v", err), http.StatusInternalServerError)
 		return

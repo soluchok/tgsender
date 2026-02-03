@@ -79,7 +79,7 @@ func New() *cobra.Command {
 			accountValidator := accounts.NewValidator(accountStore, cfg.AppID, cfg.AppHash)
 
 			// Initialize spam checker
-			spamChecker := accounts.NewSpamChecker(cfg.AppID, cfg.AppHash)
+			spamChecker := accounts.NewSpamChecker(accountStore, cfg.AppID, cfg.AppHash)
 
 			// Initialize accounts handler
 			accountsHandler := accounts.NewHandler(accountStore, qrManager, accountValidator, spamChecker, authHandler)
@@ -118,6 +118,7 @@ func New() *cobra.Command {
 			mux.HandleFunc("/api/accounts/qr/status", accountsHandler.HandleQRAuthStatus)
 			mux.HandleFunc("/api/accounts/qr/cancel", accountsHandler.HandleCancelQRAuth)
 			mux.HandleFunc("/api/accounts/qr/password", accountsHandler.HandleSubmitPassword)
+			mux.HandleFunc("/api/accounts/{id}/test-proxy", accountsHandler.HandleTestProxy)
 
 			// Contacts routes
 			mux.HandleFunc("/api/accounts/{id}/check-numbers", contactsHandler.HandleCheckNumbers)

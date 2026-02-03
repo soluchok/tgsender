@@ -3,15 +3,15 @@ package accounts
 import (
 	"context"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/tg"
+
+	tgclient "github.com/soluchok/tgsender/pkg/telegram"
 )
 
 const spamCacheTTL = 10 * time.Minute
@@ -33,6 +33,7 @@ type cachedSpamStatus struct {
 
 // SpamChecker checks if an account is in Telegram's spam filter
 type SpamChecker struct {
+	store   *Store
 	appID   int
 	appHash string
 	cache   map[string]*cachedSpamStatus
@@ -40,8 +41,9 @@ type SpamChecker struct {
 }
 
 // NewSpamChecker creates a new spam checker
-func NewSpamChecker(appID int, appHash string) *SpamChecker {
+func NewSpamChecker(store *Store, appID int, appHash string) *SpamChecker {
 	return &SpamChecker{
+		store:   store,
 		appID:   appID,
 		appHash: appHash,
 		cache:   make(map[string]*cachedSpamStatus),
@@ -81,24 +83,22 @@ func (s *SpamChecker) CheckSpamStatus(ctx context.Context, accountID string, for
 
 // fetchSpamStatus sends /start to @SpamBot and parses the response
 func (s *SpamChecker) fetchSpamStatus(ctx context.Context, accountID string) (*SpamStatus, error) {
+	// Get account to access proxy settings
+	account, ok := s.store.Get(accountID)
+	if !ok {
+		return nil, fmt.Errorf("account not found")
+	}
+
 	sessionPath := ".data/account_" + accountID + ".json"
 
-	// Check if session file exists
-	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("session not found - please re-authenticate this account")
+	client, err := tgclient.CreateClient(s.appID, s.appHash, sessionPath, account.ProxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client: %w", err)
 	}
-
-	sessionStorage := &telegram.FileSessionStorage{
-		Path: sessionPath,
-	}
-
-	client := telegram.NewClient(s.appID, s.appHash, telegram.Options{
-		SessionStorage: sessionStorage,
-	})
 
 	var status *SpamStatus
 
-	err := client.Run(ctx, func(ctx context.Context) error {
+	err = client.Run(ctx, func(ctx context.Context) error {
 		api := client.API()
 
 		// Resolve @SpamBot username

@@ -33,6 +33,7 @@ export interface TelegramAccount {
   is_active: boolean;
   created_at: string;
   has_openai_token?: boolean;
+  proxy_url?: string;
 }
 
 // QR code auth state

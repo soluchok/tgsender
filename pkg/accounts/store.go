@@ -25,6 +25,7 @@ type Account struct {
 	IsActive    bool      `json:"is_active"`
 	CreatedAt   time.Time `json:"created_at"`
 	OpenAIToken string    `json:"openai_token,omitempty"` // OpenAI API token for message rewriting
+	ProxyURL    string    `json:"proxy_url,omitempty"`    // Proxy URL e.g. "socks5://user:pass@host:port"
 }
 
 // Store manages account storage

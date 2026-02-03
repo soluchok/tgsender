@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"os"
 	"strings"
 
-	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/downloader"
 	"github.com/gotd/td/tg"
+
+	tgclient "github.com/soluchok/tgsender/pkg/telegram"
 )
 
 // Validator checks if Telegram sessions are still valid
@@ -42,20 +42,12 @@ func (v *Validator) ValidateSession(ctx context.Context, account *Account) (*Val
 	// Use account ID (which is the TelegramID) for session path
 	sessionPath := ".data/account_" + account.ID + ".json"
 
-	// Check if session file exists
-	if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
-		return result, nil
+	client, err := tgclient.CreateClient(v.appID, v.appHash, sessionPath, account.ProxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client: %w", err)
 	}
 
-	sessionStorage := &telegram.FileSessionStorage{
-		Path: sessionPath,
-	}
-
-	client := telegram.NewClient(v.appID, v.appHash, telegram.Options{
-		SessionStorage: sessionStorage,
-	})
-
-	err := client.Run(ctx, func(ctx context.Context) error {
+	err = client.Run(ctx, func(ctx context.Context) error {
 		// Try to get self - if this succeeds, session is valid
 		self, err := client.Self(ctx)
 		if err != nil {

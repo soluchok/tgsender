@@ -128,7 +128,7 @@ func (h *Handler) HandleCheckNumbers(w http.ResponseWriter, r *http.Request) {
 		Usernames: usernames,
 		Labels:    req.Labels,
 	}
-	result, err := h.checker.CheckContacts(r.Context(), accountID, sessionPath, input)
+	result, err := h.checker.CheckContacts(r.Context(), accountID, sessionPath, account.ProxyURL, input)
 	if err != nil {
 		writeJSONError(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -336,7 +336,7 @@ func (h *Handler) HandleImportFromChats(w http.ResponseWriter, r *http.Request) 
 	sessionPath := fmt.Sprintf(".data/account_%s.json", accountID)
 
 	// Start async import job
-	job, isNew := h.jobManager.StartImport(accountID, sessionPath)
+	job, isNew := h.jobManager.StartImport(accountID, sessionPath, account.ProxyURL)
 
 	writeJSON(w, map[string]interface{}{
 		"id":         job.ID,
@@ -385,7 +385,7 @@ func (h *Handler) HandleImportContacts(w http.ResponseWriter, r *http.Request) {
 	sessionPath := fmt.Sprintf(".data/account_%s.json", accountID)
 
 	// Start async import job
-	job, isNew := h.jobManager.StartImportContacts(accountID, sessionPath)
+	job, isNew := h.jobManager.StartImportContacts(accountID, sessionPath, account.ProxyURL)
 
 	writeJSON(w, map[string]interface{}{
 		"id":          job.ID,
@@ -589,7 +589,7 @@ func (h *Handler) HandleImportFromFile(w http.ResponseWriter, r *http.Request) {
 	sessionPath := fmt.Sprintf(".data/account_%s.json", accountID)
 
 	// Import contacts
-	result, err := h.checker.ImportFromFile(r.Context(), accountID, sessionPath, req.Contacts)
+	result, err := h.checker.ImportFromFile(r.Context(), accountID, sessionPath, account.ProxyURL, req.Contacts)
 	if err != nil {
 		writeJSONError(w, err.Error(), http.StatusInternalServerError)
 		return
