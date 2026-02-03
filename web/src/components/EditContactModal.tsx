@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Contact } from '../types';
-
-const API_URL = import.meta.env.VITE_API_URL || '';
+import { apiFetch, isUnauthorizedError } from '../utils/api';
 
 interface EditContactModalProps {
   contact: Contact;
@@ -28,12 +27,11 @@ export function EditContactModal({ contact, onClose, onSave }: EditContactModalP
       .filter(l => l.length > 0);
 
     try {
-      const response = await fetch(`${API_URL}/api/contacts/${contact.id}/update`, {
+      const response = await apiFetch(`/api/contacts/${contact.id}/update`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include',
         body: JSON.stringify({
           first_name: firstName,
           last_name: lastName,
@@ -50,6 +48,7 @@ export function EditContactModal({ contact, onClose, onSave }: EditContactModalP
       onSave(updatedContact);
       onClose();
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       setError(err instanceof Error ? err.message : 'Failed to update contact');
     } finally {
       setIsSaving(false);

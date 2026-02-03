@@ -1,7 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { TelegramAccount, Contact } from '../types';
-
-const API_URL = import.meta.env.VITE_API_URL || '';
+import { apiFetch, isUnauthorizedError } from '../utils/api';
 
 interface SendMessagesModalProps {
   account: TelegramAccount;
@@ -54,14 +53,13 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
   useEffect(() => {
     const checkSettings = async () => {
       try {
-        const response = await fetch(`${API_URL}/api/accounts/${account.id}/settings`, {
-          credentials: 'include',
-        });
+        const response = await apiFetch(`/api/accounts/${account.id}/settings`);
         if (response.ok) {
           const data = await response.json();
           setHasOpenAIToken(data.has_openai_token || false);
         }
       } catch (err) {
+        if (isUnauthorizedError(err)) return;
         console.error('Failed to check account settings:', err);
       }
     };
@@ -80,14 +78,13 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
   // Fetch job history on mount and when viewing history
   const fetchHistory = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/accounts/${account.id}/send/history`, {
-        credentials: 'include',
-      });
+      const response = await apiFetch(`/api/accounts/${account.id}/send/history`);
       if (response.ok) {
         const data = await response.json();
         setJobHistory(data.jobs || []);
       }
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       console.error('Failed to fetch history:', err);
     }
   }, [account.id]);
@@ -99,9 +96,8 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
   // Poll for job status
   const pollJobStatus = useCallback(async (jobId: string) => {
     try {
-      const response = await fetch(
-        `${API_URL}/api/accounts/${account.id}/send/status?job_id=${jobId}`,
-        { credentials: 'include' }
+      const response = await apiFetch(
+        `/api/accounts/${account.id}/send/status?job_id=${jobId}`
       );
       if (response.ok) {
         const job: SendJob = await response.json();
@@ -118,6 +114,13 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
         }
       }
     } catch (err) {
+      if (isUnauthorizedError(err)) {
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+        return;
+      }
       console.error('Failed to poll job status:', err);
     }
   }, [account.id, fetchHistory]);
@@ -251,9 +254,8 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
         requestBody.ai_prompt = aiPrompt.trim();
       }
 
-      const response = await fetch(`${API_URL}/api/accounts/${account.id}/send`, {
+      const response = await apiFetch(`/api/accounts/${account.id}/send`, {
         method: 'POST',
-        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -274,6 +276,7 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
       });
       startPolling(data.id);
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       setError(err instanceof Error ? err.message : 'Failed to send messages');
       setViewMode('compose');
       setIsSending(false);
@@ -286,9 +289,8 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
     setViewMode('progress');
 
     try {
-      const response = await fetch(`${API_URL}/api/accounts/${account.id}/send/retry`, {
+      const response = await apiFetch(`/api/accounts/${account.id}/send/retry`, {
         method: 'POST',
-        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -308,6 +310,7 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
       });
       startPolling(data.id);
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       setError(err instanceof Error ? err.message : 'Failed to retry');
       setViewMode('result');
       setIsSending(false);

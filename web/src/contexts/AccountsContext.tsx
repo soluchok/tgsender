@@ -1,7 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import { TelegramAccount, QRAuthState, SpamStatus } from '../types';
-
-const API_URL = import.meta.env.VITE_API_URL || '';
+import { apiFetch, isUnauthorizedError } from '../utils/api';
 
 interface AccountsContextType {
   accounts: TelegramAccount[];
@@ -38,9 +37,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
       setIsLoading(true);
       setError(null);
 
-      const response = await fetch(`${API_URL}/api/accounts`, {
-        credentials: 'include',
-      });
+      const response = await apiFetch('/api/accounts');
 
       if (!response.ok) {
         throw new Error('Failed to fetch accounts');
@@ -49,6 +46,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
       const data = await response.json();
       setAccounts(data.accounts || []);
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       setError(err instanceof Error ? err.message : 'Failed to fetch accounts');
     } finally {
       setIsLoading(false);
@@ -62,9 +60,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
     if (account) {
       // Validate session when selecting an account
       try {
-        const response = await fetch(`${API_URL}/api/accounts/${account.id}/validate`, {
-          credentials: 'include',
-        });
+        const response = await apiFetch(`/api/accounts/${account.id}/validate`);
 
         if (response.ok) {
           const data = await response.json();
@@ -78,14 +74,12 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
               a.id === account.id ? { ...a, ...updates } : a
             ));
             setSelectedAccount(prev => prev ? { ...prev, ...updates } : null);
-
-            // Check spam status if account is active
-            if (data.is_active) {
-              checkSpamStatusForAccount(account.id);
-            }
+            // Note: Spam status check removed - user can manually check via refresh button
+            // to avoid triggering Telegram's anti-automation detection
           }
         }
       } catch (err) {
+        if (isUnauthorizedError(err)) return;
         console.error('Failed to validate account:', err);
       }
     }
@@ -95,17 +89,16 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
     setIsCheckingSpam(true);
     try {
       const url = forceRefresh 
-        ? `${API_URL}/api/accounts/${accountId}/spam-status?refresh=true`
-        : `${API_URL}/api/accounts/${accountId}/spam-status`;
-      const response = await fetch(url, {
-        credentials: 'include',
-      });
+        ? `/api/accounts/${accountId}/spam-status?refresh=true`
+        : `/api/accounts/${accountId}/spam-status`;
+      const response = await apiFetch(url);
 
       if (response.ok) {
         const data = await response.json();
         setSpamStatus(data);
       }
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       console.error('Failed to check spam status:', err);
     } finally {
       setIsCheckingSpam(false);
@@ -132,9 +125,8 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
     try {
       setQRAuth({ status: 'pending' });
 
-      const response = await fetch(`${API_URL}/api/accounts/qr/start`, {
+      const response = await apiFetch('/api/accounts/qr/start', {
         method: 'POST',
-        credentials: 'include',
       });
 
       if (!response.ok) {
@@ -170,9 +162,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
           return;
         }
         try {
-          const pollResponse = await fetch(`${API_URL}/api/accounts/qr/status?token=${data.token}`, {
-            credentials: 'include',
-          });
+          const pollResponse = await apiFetch(`/api/accounts/qr/status?token=${data.token}`);
 
           if (!pollResponse.ok) {
             // Session not found - might be expired or completed
@@ -214,6 +204,11 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
             }));
           }
         } catch (err) {
+          if (isUnauthorizedError(err)) {
+            window.clearInterval(interval);
+            pollIntervalRef.current = null;
+            return;
+          }
           console.error('Poll error:', err);
           // Continue polling on network errors
         }
@@ -221,6 +216,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
 
       pollIntervalRef.current = interval;
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       setQRAuth({
         status: 'error',
         error: err instanceof Error ? err.message : 'Failed to start QR authentication',
@@ -244,9 +240,8 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
 
       setQRAuth(prev => ({ ...prev, status: 'pending' }));
 
-      const response = await fetch(`${API_URL}/api/accounts/qr/password`, {
+      const response = await apiFetch('/api/accounts/qr/password', {
         method: 'POST',
-        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -283,6 +278,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
         }));
       }
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       setQRAuth(prev => ({
         ...prev,
         status: 'password_required',
@@ -293,9 +289,8 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
 
   const removeAccount = useCallback(async (id: string) => {
     try {
-      const response = await fetch(`${API_URL}/api/accounts/${id}`, {
+      const response = await apiFetch(`/api/accounts/${id}`, {
         method: 'DELETE',
-        credentials: 'include',
       });
 
       if (!response.ok) {
@@ -307,6 +302,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
         setSelectedAccount(null);
       }
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       setError(err instanceof Error ? err.message : 'Failed to remove account');
     }
   }, [selectedAccount]);

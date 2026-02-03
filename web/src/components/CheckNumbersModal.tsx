@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { TelegramAccount, CheckNumbersResult, Contact } from '../types';
-
-const API_URL = import.meta.env.VITE_API_URL || '';
+import { apiFetch, isUnauthorizedError } from '../utils/api';
 
 interface CheckNumbersModalProps {
   account: TelegramAccount;
@@ -39,9 +38,8 @@ export function CheckNumbersModal({ account, onClose }: CheckNumbersModalProps) 
     setIsChecking(true);
 
     try {
-      const response = await fetch(`${API_URL}/api/accounts/${account.id}/check-numbers`, {
+      const response = await apiFetch(`/api/accounts/${account.id}/check-numbers`, {
         method: 'POST',
-        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -56,6 +54,7 @@ export function CheckNumbersModal({ account, onClose }: CheckNumbersModalProps) 
 
       setResult(data);
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       setError(err instanceof Error ? err.message : 'Failed to check contacts');
     } finally {
       setIsChecking(false);

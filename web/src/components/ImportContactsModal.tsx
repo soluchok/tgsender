@@ -1,7 +1,6 @@
 import { useState, useMemo, useRef } from 'react';
 import { TelegramAccount } from '../types';
-
-const API_URL = import.meta.env.VITE_API_URL || '';
+import { apiFetch, isUnauthorizedError } from '../utils/api';
 
 interface ImportContactsModalProps {
   account: TelegramAccount;
@@ -174,12 +173,11 @@ export function ImportContactsModal({ account, onClose, onImported }: ImportCont
     setIsImporting(true);
 
     try {
-      const response = await fetch(`${API_URL}/api/accounts/${account.id}/import-file`, {
+      const response = await apiFetch(`/api/accounts/${account.id}/import-file`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include',
         body: JSON.stringify({ contacts: contactsToImport }),
       });
 
@@ -196,6 +194,7 @@ export function ImportContactsModal({ account, onClose, onImported }: ImportCont
         onImported();
       }
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       setError(err instanceof Error ? err.message : 'Failed to import contacts');
     } finally {
       setIsImporting(false);

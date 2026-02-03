@@ -3,8 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { UserProfile, Sidebar, CheckNumbersModal, SendMessagesModal, EditContactModal, AccountSettingsModal, ExportContactsModal, ImportContactsModal } from '../components';
 import { useAuth, useAccounts, AccountsProvider } from '../contexts';
 import { Contact } from '../types';
-
-const API_URL = import.meta.env.VITE_API_URL || '';
+import { apiFetch, isUnauthorizedError } from '../utils/api';
 
 interface ImportProgress {
   progress: number;
@@ -59,15 +58,14 @@ function DashboardContent() {
 
     setIsLoadingContacts(true);
     try {
-      const response = await fetch(`${API_URL}/api/accounts/${selectedAccount.id}/contacts?valid=true`, {
-        credentials: 'include',
-      });
+      const response = await apiFetch(`/api/accounts/${selectedAccount.id}/contacts?valid=true`);
 
       if (response.ok) {
         const data = await response.json();
         setContacts(data.contacts || []);
       }
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       console.error('Failed to fetch contacts:', err);
     } finally {
       setIsLoadingContacts(false);
@@ -102,9 +100,8 @@ function DashboardContent() {
 
     pollIntervalRef.current = window.setInterval(async () => {
       try {
-        const statusResponse = await fetch(
-          `${API_URL}/api/accounts/${accountId}/import-chats/status?job_id=${jobId}`,
-          { credentials: 'include' }
+        const statusResponse = await apiFetch(
+          `/api/accounts/${accountId}/import-chats/status?job_id=${jobId}`
         );
 
         const statusData = await statusResponse.json();
@@ -139,6 +136,13 @@ function DashboardContent() {
           }, 5000);
         }
       } catch (err) {
+        if (isUnauthorizedError(err)) {
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+          }
+          return;
+        }
         console.error('Failed to poll status:', err);
         if (pollIntervalRef.current) {
           clearInterval(pollIntervalRef.current);
@@ -152,9 +156,8 @@ function DashboardContent() {
   // Check if there's an active import job for the account
   const checkForActiveImportJob = async (accountId: string) => {
     try {
-      const response = await fetch(
-        `${API_URL}/api/accounts/${accountId}/import-chats/status`,
-        { credentials: 'include' }
+      const response = await apiFetch(
+        `/api/accounts/${accountId}/import-chats/status`
       );
 
       if (!response.ok) return;
@@ -173,6 +176,7 @@ function DashboardContent() {
         startPolling(accountId, data.id);
       }
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       console.error('Failed to check for active import job:', err);
     }
   };
@@ -189,15 +193,15 @@ function DashboardContent() {
 
   const handleDeleteContact = async (contactId: string) => {
     try {
-      const response = await fetch(`${API_URL}/api/contacts/${contactId}`, {
+      const response = await apiFetch(`/api/contacts/${contactId}`, {
         method: 'DELETE',
-        credentials: 'include',
       });
 
       if (response.ok) {
         setContacts(prev => prev.filter(c => c.id !== contactId));
       }
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       console.error('Failed to delete contact:', err);
     }
   };
@@ -221,9 +225,8 @@ function DashboardContent() {
 
     try {
       // Start the import job
-      const response = await fetch(`${API_URL}/api/accounts/${selectedAccount.id}/import-chats`, {
+      const response = await apiFetch(`/api/accounts/${selectedAccount.id}/import-chats`, {
         method: 'POST',
-        credentials: 'include',
       });
 
       const data = await response.json();
@@ -243,6 +246,7 @@ function DashboardContent() {
 
       startPolling(selectedAccount.id, data.id);
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       alert(err instanceof Error ? err.message : 'Failed to import contacts from chats');
       setImportProgress(null);
     }
@@ -259,9 +263,8 @@ function DashboardContent() {
 
     try {
       // Start the import job
-      const response = await fetch(`${API_URL}/api/accounts/${selectedAccount.id}/import-contacts`, {
+      const response = await apiFetch(`/api/accounts/${selectedAccount.id}/import-contacts`, {
         method: 'POST',
-        credentials: 'include',
       });
 
       const data = await response.json();
@@ -281,6 +284,7 @@ function DashboardContent() {
 
       startPolling(selectedAccount.id, data.id);
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       alert(err instanceof Error ? err.message : 'Failed to import contacts');
       setImportProgress(null);
     }

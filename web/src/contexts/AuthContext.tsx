@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { AuthContextType, AuthState, TelegramUser } from '../types';
+import { setUnauthorizedHandler } from '../utils/api';
 
 // API base URL - empty string for local dev (uses Vite proxy), full URL for production
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -100,6 +101,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
     }
   }, []);
+
+  // Handle forced logout (e.g., from 401 response) and redirect to login
+  const handleUnauthorized = useCallback(() => {
+    setState({
+      user: null,
+      isAuthenticated: false,
+      isLoading: false,
+      error: null,
+    });
+    // Redirect to login page
+    window.location.href = '/login';
+  }, []);
+
+  // Register the unauthorized handler on mount
+  useEffect(() => {
+    setUnauthorizedHandler(handleUnauthorized);
+  }, [handleUnauthorized]);
 
   useEffect(() => {
     checkAuth();

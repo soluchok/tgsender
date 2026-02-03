@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { TelegramAccount } from '../types';
-
-const API_URL = import.meta.env.VITE_API_URL || '';
+import { apiFetch, isUnauthorizedError } from '../utils/api';
 
 interface AccountSettingsModalProps {
   account: TelegramAccount;
@@ -23,9 +22,7 @@ export function AccountSettingsModal({ account, onClose, onSave }: AccountSettin
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const response = await fetch(`${API_URL}/api/accounts/${account.id}/settings`, {
-          credentials: 'include',
-        });
+        const response = await apiFetch(`/api/accounts/${account.id}/settings`);
 
         if (response.ok) {
           const data = await response.json();
@@ -33,6 +30,7 @@ export function AccountSettingsModal({ account, onClose, onSave }: AccountSettin
           setProxyUrl(data.proxy_url || '');
         }
       } catch (err) {
+        if (isUnauthorizedError(err)) return;
         console.error('Failed to fetch settings:', err);
       } finally {
         setIsLoading(false);
@@ -47,9 +45,8 @@ export function AccountSettingsModal({ account, onClose, onSave }: AccountSettin
     setIsSaving(true);
 
     try {
-      const response = await fetch(`${API_URL}/api/accounts/${account.id}/settings`, {
+      const response = await apiFetch(`/api/accounts/${account.id}/settings`, {
         method: 'PUT',
-        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -67,6 +64,7 @@ export function AccountSettingsModal({ account, onClose, onSave }: AccountSettin
       onSave(openAIToken.trim().length > 0);
       onClose();
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       setError(err instanceof Error ? err.message : 'Failed to save settings');
     } finally {
       setIsSaving(false);
@@ -83,9 +81,8 @@ export function AccountSettingsModal({ account, onClose, onSave }: AccountSettin
     setProxyTestResult(null);
 
     try {
-      const response = await fetch(`${API_URL}/api/accounts/${account.id}/test-proxy`, {
+      const response = await apiFetch(`/api/accounts/${account.id}/test-proxy`, {
         method: 'POST',
-        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -102,6 +99,7 @@ export function AccountSettingsModal({ account, onClose, onSave }: AccountSettin
 
       setProxyTestResult(data);
     } catch (err) {
+      if (isUnauthorizedError(err)) return;
       setProxyTestResult({
         success: false,
         error: err instanceof Error ? err.message : 'Failed to test proxy',
