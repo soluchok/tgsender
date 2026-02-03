@@ -45,17 +45,6 @@ type SendJob struct {
 	OpenAIToken string            `json:"-"`                   // OpenAI token (not persisted)
 }
 
-// GetFailedContactIDs returns the contact IDs that failed to receive the message
-func (j *SendJob) GetFailedContactIDs() []string {
-	var failed []string
-	for _, r := range j.Results {
-		if !r.Success {
-			failed = append(failed, r.ContactID)
-		}
-	}
-	return failed
-}
-
 // JobStore manages persistent storage of send jobs
 type JobStore struct {
 	mu      sync.RWMutex
@@ -322,47 +311,6 @@ func (m *JobManager) StartSend(accountID, sessionPath, proxyURL, message string,
 
 	// Start the job in background
 	go m.runSend(job.ID, openAIToken)
-
-	return job, nil
-}
-
-// RetryFailed retries sending to failed contacts from a previous job
-func (m *JobManager) RetryFailed(jobID string) (*SendJob, error) {
-	oldJob, ok := m.store.Get(jobID)
-	if !ok {
-		return nil, fmt.Errorf("job not found")
-	}
-
-	// Get failed contact IDs
-	failedIDs := oldJob.GetFailedContactIDs()
-	if len(failedIDs) == 0 {
-		return nil, fmt.Errorf("no failed contacts to retry")
-	}
-
-	// Create new job for retry (without AI - retries use original message)
-	job := &SendJob{
-		ID:          generateJobID(),
-		AccountID:   oldJob.AccountID,
-		Status:      JobStatusPending,
-		Message:     oldJob.Message,
-		DelayMinMS:  oldJob.DelayMinMS,
-		DelayMaxMS:  oldJob.DelayMaxMS,
-		Total:       len(failedIDs),
-		Results:     make([]RecipientResult, 0),
-		StartedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		ContactIDs:  failedIDs,
-		SessionPath: oldJob.SessionPath,
-		ProxyURL:    oldJob.ProxyURL, // Reuse proxy from original job
-		AIPrompt:    "",              // No AI for retries
-	}
-
-	if err := m.store.Create(job); err != nil {
-		return nil, fmt.Errorf("failed to create retry job: %w", err)
-	}
-
-	// Start the job in background (no OpenAI token for retries)
-	go m.runSend(job.ID, "")
 
 	return job, nil
 }

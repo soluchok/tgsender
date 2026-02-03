@@ -140,7 +140,6 @@ func New() *cobra.Command {
 			messagesHandler := messages.NewHandler(messageSender, jobStore, accountStore, authHandler)
 			mux.HandleFunc("/api/accounts/{id}/send", messagesHandler.HandleSendMessages)
 			mux.HandleFunc("/api/accounts/{id}/send/status", messagesHandler.HandleSendStatus)
-			mux.HandleFunc("/api/accounts/{id}/send/retry", messagesHandler.HandleRetryFailed)
 			mux.HandleFunc("/api/accounts/{id}/send/history", messagesHandler.HandleSendHistory)
 
 			// Health check

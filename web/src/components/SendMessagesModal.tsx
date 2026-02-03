@@ -21,6 +21,8 @@ interface SendJob {
   account_id: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   message: string;
+  delay_min_ms?: number;
+  delay_max_ms?: number;
   total: number;
   sent: number;
   failed: number;
@@ -28,6 +30,7 @@ interface SendJob {
   error?: string;
   started_at: string;
   updated_at: string;
+  ai_prompt?: string;
 }
 
 type ViewMode = 'compose' | 'progress' | 'result' | 'history';
@@ -283,38 +286,41 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
     }
   };
 
-  const handleRetry = async (jobId: string) => {
-    setError(null);
-    setIsSending(true);
-    setViewMode('progress');
+  const handleRetry = () => {
+    if (!currentJob) return;
 
-    try {
-      const response = await apiFetch(`/api/accounts/${account.id}/send/retry`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ job_id: jobId }),
-      });
+    // Get failed contact IDs from the job results
+    const failedContactIds = currentJob.results
+      ?.filter(r => !r.success)
+      .map(r => r.contact_id) || [];
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to retry');
-      }
-
-      setCurrentJob({
-        ...data,
-        message: currentJob?.message || '',
-        results: [],
-      });
-      startPolling(data.id);
-    } catch (err) {
-      if (isUnauthorizedError(err)) return;
-      setError(err instanceof Error ? err.message : 'Failed to retry');
-      setViewMode('result');
-      setIsSending(false);
+    // Pre-fill the form with the original job values
+    setMessage(currentJob.message || '');
+    setSelectedIds(new Set(failedContactIds));
+    
+    // Restore delay settings (convert from ms to seconds)
+    if (currentJob.delay_min_ms !== undefined) {
+      setDelayMin(Math.floor(currentJob.delay_min_ms / 1000));
     }
+    if (currentJob.delay_max_ms !== undefined) {
+      setDelayMax(Math.floor(currentJob.delay_max_ms / 1000));
+    }
+
+    // Restore AI settings if the account still has OpenAI token
+    if (currentJob.ai_prompt && hasOpenAIToken) {
+      setUseAI(true);
+      setAiPrompt(currentJob.ai_prompt);
+    } else {
+      setUseAI(false);
+      setAiPrompt('');
+    }
+
+    // Clear filters and go to compose view
+    setSelectedLabels(new Set());
+    setSearchQuery('');
+    setError(null);
+    setCurrentJob(null);
+    setViewMode('compose');
   };
 
   const handleViewHistory = () => {
@@ -401,7 +407,7 @@ export function SendMessagesModal({ account, contacts, onClose }: SendMessagesMo
           {viewMode === 'result' && currentJob && (
             <ResultView
               job={currentJob}
-              onRetry={() => handleRetry(currentJob.id)}
+              onRetry={handleRetry}
               onBack={handleBackToCompose}
               onClose={handleClose}
             />
@@ -745,8 +751,22 @@ function ResultView({ job, onRetry, onBack, onClose }: ResultViewProps) {
 
       {job.message && (
         <div className="result-message">
-          <label>Message sent:</label>
+          <label>Message template:</label>
           <div className="message-preview">{job.message}</div>
+        </div>
+      )}
+
+      {job.ai_prompt && (
+        <div className="result-message ai-prompt">
+          <label>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px', verticalAlign: 'middle' }}>
+              <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"></path>
+              <circle cx="7.5" cy="14.5" r="1.5"></circle>
+              <circle cx="16.5" cy="14.5" r="1.5"></circle>
+            </svg>
+            AI rewriting enabled
+          </label>
+          <div className="message-preview ai">{job.ai_prompt}</div>
         </div>
       )}
 
@@ -860,6 +880,15 @@ function HistoryView({ jobs, onViewJob, onBack }: HistoryViewProps) {
             >
               <div className="history-item-header">
                 <span className="history-date">{formatDate(job.started_at)}</span>
+                {job.ai_prompt && (
+                  <span className="ai-badge" title="AI rewriting enabled">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"></path>
+                      <circle cx="7.5" cy="14.5" r="1.5"></circle>
+                      <circle cx="16.5" cy="14.5" r="1.5"></circle>
+                    </svg>
+                  </span>
+                )}
                 {getStatusBadge(job.status)}
               </div>
               <div className="history-item-message">
