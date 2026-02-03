@@ -62,9 +62,12 @@ func (v *Validator) ValidateSession(ctx context.Context, account *Account) (*Val
 		result.IsValid = true
 
 		// Try to get profile photo
+		if self.Photo == nil {
+			return nil // No photo set
+		}
 		photo, ok := self.Photo.AsNotEmpty()
 		if !ok {
-			return nil // No photo set
+			return nil // Photo is empty
 		}
 
 		// Download the photo
