@@ -528,9 +528,12 @@ func generateQRCode(url string) (string, error) {
 
 // downloadProfilePhoto downloads the profile photo for a user
 func downloadProfilePhoto(ctx context.Context, client *telegram.Client, user *tg.User) string {
+	if user.Photo == nil {
+		return "" // No photo set
+	}
 	photo, ok := user.Photo.AsNotEmpty()
 	if !ok {
-		return "" // No photo set
+		return "" // Photo is empty
 	}
 
 	d := downloader.NewDownloader()
